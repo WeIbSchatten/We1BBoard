@@ -72,7 +72,26 @@ func (s *InboundService) Update(in *model.Inbound) error {
 		return err
 	}
 	var old model.Inbound
-	_ = database.DB.First(&old, in.ID)
+	if err := database.DB.First(&old, in.ID).Error; err != nil {
+		return err
+	}
+	// Preserve fields the structured form may omit.
+	if in.Tag == "" {
+		in.Tag = old.Tag
+	}
+	if in.Sniffing == "" {
+		in.Sniffing = old.Sniffing
+	}
+	if in.NodeID == nil {
+		in.NodeID = old.NodeID
+	}
+	in.Up = old.Up
+	in.Down = old.Down
+	in.Total = old.Total
+	if in.ExpiryTime == 0 {
+		in.ExpiryTime = old.ExpiryTime
+	}
+	in.CreatedAt = old.CreatedAt
 	if err := database.DB.Save(in).Error; err != nil {
 		return err
 	}
@@ -130,9 +149,22 @@ func (s *ClientService) Create(c *model.Client) error {
 }
 
 func (s *ClientService) Update(c *model.Client) error {
+	var old model.Client
+	if err := database.DB.First(&old, c.ID).Error; err != nil {
+		return err
+	}
+	if c.SubID == "" {
+		c.SubID = old.SubID
+	}
 	if c.SubID != "" && !sub.ValidSubID(c.SubID) {
 		return fmt.Errorf("invalid subId (16-64 alphanumeric/_/-)")
 	}
+	if c.InboundID == 0 {
+		c.InboundID = old.InboundID
+	}
+	c.Up = old.Up
+	c.Down = old.Down
+	c.CreatedAt = old.CreatedAt
 	if err := database.DB.Save(c).Error; err != nil {
 		return err
 	}

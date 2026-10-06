@@ -108,6 +108,8 @@ func (s *Server) Start() error {
 			sess.GET("/me", api.Me)
 			sess.POST("/password", api.ChangePassword)
 			sess.GET("/protocols", api.ListProtocols)
+			sess.GET("/tools/reality-keys", api.RealityKeys)
+			sess.GET("/tools/uuid", api.RandomUUID)
 
 			sess.GET("/inbounds", api.ListInbounds)
 			sess.POST("/inbounds", api.CreateInbound)

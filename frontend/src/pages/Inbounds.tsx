@@ -1,41 +1,19 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { api, type Client, type Inbound } from '../api'
 import { useApp } from '../AppContext'
-
-const PROTOCOLS = [
-  'vless', 'vmess', 'trojan', 'shadowsocks', 'wireguard', 'amneziawg',
-  'tuic', 'hysteria2', 'mtproto', 'http', 'socks', 'tunnel', 'tun',
-]
-
-const defaultStream = JSON.stringify({ network: 'tcp', security: 'none' }, null, 2)
-const realityStream = JSON.stringify({
-  network: 'tcp',
-  security: 'reality',
-  realitySettings: {
-    show: false,
-    dest: 'www.cloudflare.com:443',
-    xver: 0,
-    serverNames: ['www.cloudflare.com'],
-    privateKey: '',
-    shortIds: [''],
-    fingerprint: 'chrome',
-  },
-}, null, 2)
+import { ClientFormModal } from '../components/ClientFormModal'
+import { InboundFormModal } from '../components/InboundFormModal'
 
 export function InboundsPage() {
   const { tr } = useApp()
   const [rows, setRows] = useState<Inbound[]>([])
-  const [open, setOpen] = useState(false)
-  const [form, setForm] = useState({
-    remark: '',
-    port: 443,
-    protocol: 'vless',
-    listen: '0.0.0.0',
-    enable: true,
-    settings: '{}',
-    streamSettings: defaultStream,
+  const [expanded, setExpanded] = useState<number | null>(null)
+  const [inboundModal, setInboundModal] = useState<{ open: boolean; mode: 'add' | 'edit'; inbound: Inbound | null }>({
+    open: false, mode: 'add', inbound: null,
   })
-  const [error, setError] = useState('')
+  const [clientModal, setClientModal] = useState<{ open: boolean; mode: 'add' | 'edit'; inbound: Inbound | null; client: Client | null }>({
+    open: false, mode: 'add', inbound: null, client: null,
+  })
   const [link, setLink] = useState('')
   const [subUrls, setSubUrls] = useState<Record<string, string> | null>(null)
   const [qrClientId, setQrClientId] = useState<number | null>(null)
@@ -48,40 +26,16 @@ export function InboundsPage() {
     load().catch(console.error)
   }, [])
 
-  async function create(e: FormEvent) {
-    e.preventDefault()
-    setError('')
-    try {
-      const created = await api<Inbound>('/inbounds', {
-        method: 'POST',
-        body: JSON.stringify({
-          ...form,
-          settings: form.settings || '{}',
-          streamSettings: form.streamSettings || defaultStream,
-        }),
-      })
-      // auto client for proxy protocols
-      if (!['tun', 'tunnel'].includes(form.protocol)) {
-        await api('/clients', {
-          method: 'POST',
-          body: JSON.stringify({
-            inboundId: created.id,
-            email: `${form.protocol}-${form.port}@we1b`,
-            enable: true,
-            flow: form.protocol === 'vless' && form.streamSettings.includes('reality') ? 'xtls-rprx-vision' : '',
-          }),
-        })
-      }
-      setOpen(false)
-      await load()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'error')
-    }
+  async function removeInbound(id: number) {
+    if (!confirm('Delete inbound?')) return
+    await api(`/inbounds/${id}`, { method: 'DELETE' })
+    if (expanded === id) setExpanded(null)
+    await load()
   }
 
-  async function remove(id: number) {
-    if (!confirm('Delete?')) return
-    await api(`/inbounds/${id}`, { method: 'DELETE' })
+  async function removeClient(id: number) {
+    if (!confirm('Delete client?')) return
+    await api(`/clients/${id}`, { method: 'DELETE' })
     await load()
   }
 
@@ -105,6 +59,19 @@ export function InboundsPage() {
     ? `${window.location.pathname.includes('/we1b') ? window.location.pathname.slice(0, window.location.pathname.indexOf('/we1b') + 5) : '/we1b'}/api/clients/${qrClientId}/qr`
     : ''
 
+  function traffic(c: Client) {
+    const used = ((c.up || 0) + (c.down || 0)) / (1024 * 1024 * 1024)
+    const total = c.totalGB || 0
+    if (total <= 0) return `${used.toFixed(2)} GB / ∞`
+    return `${used.toFixed(2)} / ${total} GB`
+  }
+
+  function expiryLabel(c: Client) {
+    if (!c.expiryTime) return '∞'
+    const d = new Date(c.expiryTime)
+    return d.toLocaleDateString()
+  }
+
   return (
     <div>
       <div className="page-head">
@@ -112,39 +79,120 @@ export function InboundsPage() {
           <h1 className="page-title">{tr('inbounds')}</h1>
           <p className="page-sub">VLESS / VMess / Trojan / SS / WG / TUIC / Hy2 / MTProto / …</p>
         </div>
-        <button className="btn" onClick={() => setOpen(true)}>{tr('create')}</button>
+        <button className="btn" onClick={() => setInboundModal({ open: true, mode: 'add', inbound: null })}>
+          {tr('create')}
+        </button>
       </div>
 
       <div className="card">
         <table className="table">
           <thead>
             <tr>
+              <th style={{ width: 36 }} />
               <th>ID</th>
               <th>{tr('remark')}</th>
               <th>{tr('protocol')}</th>
               <th>{tr('port')}</th>
+              <th>{tr('network')}</th>
+              <th>{tr('security')}</th>
+              <th>{tr('clients')}</th>
               <th>{tr('status')}</th>
               <th>{tr('actions')}</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
-              <tr><td colSpan={6}>{tr('empty')}</td></tr>
+              <tr><td colSpan={10}>{tr('empty')}</td></tr>
             )}
-            {rows.map((r) => (
-              <tr key={r.id}>
-                <td>{r.id}</td>
-                <td>{r.remark || r.tag}</td>
-                <td><span className="badge">{r.protocol}</span></td>
-                <td><code style={{ fontFamily: 'var(--mono)' }}>{r.port}</code></td>
-                <td><span className={`badge ${r.enable ? 'on' : 'off'}`}>{r.enable ? tr('enable') : tr('disable')}</span></td>
-                <td className="row-actions">
-                  <button className="btn secondary" onClick={() => showLink(r.clients?.[0])}>{tr('link')}</button>
-                  <button className="btn secondary" onClick={() => showSub(r.clients?.[0])}>{tr('subscription')}</button>
-                  <button className="btn danger" onClick={() => remove(r.id)}>{tr('delete')}</button>
-                </td>
-              </tr>
-            ))}
+            {rows.map((r) => {
+              let net = '—'
+              let sec = '—'
+              try {
+                const s = JSON.parse(r.streamSettings || '{}') as { network?: string; security?: string }
+                net = s.network || '—'
+                sec = s.security || '—'
+              } catch { /* */ }
+              const open = expanded === r.id
+              const clients = r.clients || []
+              return (
+                <Fragment key={r.id}>
+                  <tr>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn secondary"
+                        style={{ padding: '0.2rem 0.5rem' }}
+                        onClick={() => setExpanded(open ? null : r.id)}
+                        title={tr('clients')}
+                      >
+                        {open ? '▾' : '▸'}
+                      </button>
+                    </td>
+                    <td>{r.id}</td>
+                    <td>{r.remark || r.tag}</td>
+                    <td><span className="badge">{r.protocol}</span></td>
+                    <td><code style={{ fontFamily: 'var(--mono)' }}>{r.port}</code></td>
+                    <td><span className="badge">{net}</span></td>
+                    <td><span className="badge">{sec}</span></td>
+                    <td>{clients.length}</td>
+                    <td><span className={`badge ${r.enable ? 'on' : 'off'}`}>{r.enable ? tr('enable') : tr('disable')}</span></td>
+                    <td className="row-actions">
+                      <button className="btn secondary" onClick={() => setInboundModal({ open: true, mode: 'edit', inbound: r })}>
+                        {tr('edit')}
+                      </button>
+                      <button
+                        className="btn secondary"
+                        onClick={() => setClientModal({ open: true, mode: 'add', inbound: r, client: null })}
+                      >
+                        + {tr('clients')}
+                      </button>
+                      <button className="btn danger" onClick={() => removeInbound(r.id)}>{tr('delete')}</button>
+                    </td>
+                  </tr>
+                  {open && (
+                    <tr>
+                      <td colSpan={10} style={{ padding: '0.5rem 0.75rem 1rem', background: 'var(--bg-elevated, transparent)' }}>
+                        {clients.length === 0 ? (
+                          <p className="page-sub" style={{ margin: '0.5rem 0' }}>{tr('empty')}</p>
+                        ) : (
+                          <table className="table" style={{ margin: 0 }}>
+                            <thead>
+                              <tr>
+                                <th>Email</th>
+                                <th>UUID</th>
+                                <th>Traffic</th>
+                                <th>Expiry</th>
+                                <th>{tr('status')}</th>
+                                <th>{tr('actions')}</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {clients.map((c) => (
+                                <tr key={c.id}>
+                                  <td>{c.email}</td>
+                                  <td><code style={{ fontFamily: 'var(--mono)', fontSize: '0.8rem' }}>{c.uuid?.slice(0, 8)}…</code></td>
+                                  <td>{traffic(c)}</td>
+                                  <td>{expiryLabel(c)}</td>
+                                  <td><span className={`badge ${c.enable ? 'on' : 'off'}`}>{c.enable ? tr('enable') : tr('disable')}</span></td>
+                                  <td className="row-actions">
+                                    <button className="btn secondary" onClick={() => showLink(c)}>{tr('link')}</button>
+                                    <button className="btn secondary" onClick={() => showSub(c)}>{tr('subscription')}</button>
+                                    <button className="btn secondary" onClick={() => setClientModal({ open: true, mode: 'edit', inbound: r, client: c })}>
+                                      {tr('edit')}
+                                    </button>
+                                    <button className="btn danger" onClick={() => removeClient(c.id)}>{tr('delete')}</button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -152,7 +200,7 @@ export function InboundsPage() {
       {link && (
         <div className="card" style={{ marginTop: 12 }}>
           <div className="label">{tr('link')}</div>
-          <textarea className="textarea" readOnly value={link} />
+          <textarea className="textarea" readOnly value={link} onFocus={(e) => e.target.select()} />
           {qrSrc && <img src={qrSrc} alt="qr" style={{ marginTop: 12, width: 180, height: 180, background: '#fff', padding: 8, borderRadius: 8 }} />}
         </div>
       )}
@@ -169,54 +217,23 @@ export function InboundsPage() {
         </div>
       )}
 
-      {open && (
-        <div className="modal-backdrop" onClick={() => setOpen(false)}>
-          <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={create}>
-            <h3>{tr('create')} inbound</h3>
-            <div className="grid2">
-              <div className="field">
-                <label className="label">{tr('remark')}</label>
-                <input className="input" value={form.remark} onChange={(e) => setForm({ ...form, remark: e.target.value })} />
-              </div>
-              <div className="field">
-                <label className="label">{tr('port')}</label>
-                <input className="input" type="number" value={form.port} onChange={(e) => setForm({ ...form, port: Number(e.target.value) })} />
-              </div>
-              <div className="field">
-                <label className="label">{tr('protocol')}</label>
-                <select className="select" value={form.protocol} onChange={(e) => setForm({ ...form, protocol: e.target.value })}>
-                  {PROTOCOLS.map((p) => <option key={p} value={p}>{p}</option>)}
-                </select>
-              </div>
-              <div className="field">
-                <label className="label">Listen</label>
-                <input className="input" value={form.listen} onChange={(e) => setForm({ ...form, listen: e.target.value })} />
-              </div>
-            </div>
-            <div className="field">
-              <label className="label">Stream settings</label>
-              <div className="row-actions" style={{ marginBottom: 8 }}>
-                <button type="button" className="btn secondary" onClick={() => setForm({ ...form, streamSettings: defaultStream })}>TCP none</button>
-                <button type="button" className="btn secondary" onClick={() => setForm({ ...form, streamSettings: realityStream })}>REALITY</button>
-                <button type="button" className="btn secondary" onClick={() => setForm({ ...form, streamSettings: JSON.stringify({ network: 'ws', security: 'tls', wsSettings: { path: '/ws' }, tlsSettings: { serverName: '' } }, null, 2) })}>WS+TLS</button>
-                <button type="button" className="btn secondary" onClick={() => setForm({ ...form, streamSettings: JSON.stringify({ network: 'grpc', security: 'tls', grpcSettings: { serviceName: 'grpc' } }, null, 2) })}>gRPC</button>
-                <button type="button" className="btn secondary" onClick={() => setForm({ ...form, streamSettings: JSON.stringify({ network: 'xhttp', security: 'tls', xhttpSettings: { path: '/x', mode: 'auto' } }, null, 2) })}>XHTTP</button>
-                <button type="button" className="btn secondary" onClick={() => setForm({ ...form, streamSettings: JSON.stringify({ network: 'httpupgrade', security: 'tls', httpupgradeSettings: { path: '/hu' } }, null, 2) })}>HTTPUpgrade</button>
-                <button type="button" className="btn secondary" onClick={() => setForm({ ...form, streamSettings: JSON.stringify({ network: 'kcp', security: 'none', kcpSettings: { mtu: 1350, seed: '' } }, null, 2) })}>mKCP</button>
-              </div>
-              <textarea className="textarea" value={form.streamSettings} onChange={(e) => setForm({ ...form, streamSettings: e.target.value })} />
-            </div>
-            <div className="field">
-              <label className="label">Settings JSON</label>
-              <textarea className="textarea" value={form.settings} onChange={(e) => setForm({ ...form, settings: e.target.value })} />
-            </div>
-            {error && <p className="error">{error}</p>}
-            <div className="row-actions">
-              <button className="btn" type="submit">{tr('save')}</button>
-              <button className="btn secondary" type="button" onClick={() => setOpen(false)}>Cancel</button>
-            </div>
-          </form>
-        </div>
+      <InboundFormModal
+        open={inboundModal.open}
+        mode={inboundModal.mode}
+        inbound={inboundModal.inbound}
+        onClose={() => setInboundModal({ open: false, mode: 'add', inbound: null })}
+        onSaved={() => { void load() }}
+      />
+
+      {clientModal.inbound && (
+        <ClientFormModal
+          open={clientModal.open}
+          mode={clientModal.mode}
+          inbound={clientModal.inbound}
+          client={clientModal.client}
+          onClose={() => setClientModal({ open: false, mode: 'add', inbound: null, client: null })}
+          onSaved={() => { void load() }}
+        />
       )}
     </div>
   )
