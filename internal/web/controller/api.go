@@ -640,6 +640,21 @@ func (a *API) CreateRouting(c *gin.Context) {
 	ok(c, r)
 }
 
+func (a *API) UpdateRouting(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	var r model.RoutingRule
+	if err := c.ShouldBindJSON(&r); err != nil {
+		fail(c, 400, err)
+		return
+	}
+	r.ID = uint(id)
+	if err := a.Routing.Update(&r); err != nil {
+		fail(c, 400, err)
+		return
+	}
+	ok(c, r)
+}
+
 func (a *API) DeleteRouting(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
 	if err := a.Routing.Delete(uint(id)); err != nil {

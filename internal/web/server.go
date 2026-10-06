@@ -150,6 +150,7 @@ func (s *Server) Start() error {
 
 			sess.GET("/routing", api.ListRouting)
 			sess.POST("/routing", api.CreateRouting)
+			sess.PUT("/routing/:id", api.UpdateRouting)
 			sess.DELETE("/routing/:id", api.DeleteRouting)
 
 			sess.GET("/settings", api.GetSettings)

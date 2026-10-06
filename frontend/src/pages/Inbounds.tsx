@@ -17,6 +17,7 @@ export function InboundsPage() {
   const [link, setLink] = useState('')
   const [subUrls, setSubUrls] = useState<Record<string, string> | null>(null)
   const [qrClientId, setQrClientId] = useState<number | null>(null)
+  const [pendingClientInbound, setPendingClientInbound] = useState<Inbound | null>(null)
 
   async function load() {
     setRows(await api<Inbound[]>('/inbounds'))
@@ -25,6 +26,13 @@ export function InboundsPage() {
   useEffect(() => {
     load().catch(console.error)
   }, [])
+
+  useEffect(() => {
+    if (pendingClientInbound) {
+      setClientModal({ open: true, mode: 'add', inbound: pendingClientInbound, client: null })
+      setPendingClientInbound(null)
+    }
+  }, [pendingClientInbound, rows])
 
   async function removeInbound(id: number) {
     if (!confirm('Delete inbound?')) return
@@ -68,8 +76,7 @@ export function InboundsPage() {
 
   function expiryLabel(c: Client) {
     if (!c.expiryTime) return '∞'
-    const d = new Date(c.expiryTime)
-    return d.toLocaleDateString()
+    return new Date(c.expiryTime).toLocaleDateString()
   }
 
   return (
@@ -77,7 +84,7 @@ export function InboundsPage() {
       <div className="page-head">
         <div>
           <h1 className="page-title">{tr('inbounds')}</h1>
-          <p className="page-sub">VLESS / VMess / Trojan / SS / WG / TUIC / Hy2 / MTProto / …</p>
+          <p className="page-sub">{tr('inboundsHint')}</p>
         </div>
         <button className="btn" onClick={() => setInboundModal({ open: true, mode: 'add', inbound: null })}>
           {tr('create')}
@@ -123,7 +130,6 @@ export function InboundsPage() {
                         className="btn secondary"
                         style={{ padding: '0.2rem 0.5rem' }}
                         onClick={() => setExpanded(open ? null : r.id)}
-                        title={tr('clients')}
                       >
                         {open ? '▾' : '▸'}
                       </button>
@@ -137,23 +143,21 @@ export function InboundsPage() {
                     <td>{clients.length}</td>
                     <td><span className={`badge ${r.enable ? 'on' : 'off'}`}>{r.enable ? tr('enable') : tr('disable')}</span></td>
                     <td className="row-actions">
-                      <button className="btn secondary" onClick={() => setInboundModal({ open: true, mode: 'edit', inbound: r })}>
-                        {tr('edit')}
-                      </button>
-                      <button
-                        className="btn secondary"
-                        onClick={() => setClientModal({ open: true, mode: 'add', inbound: r, client: null })}
-                      >
-                        + {tr('clients')}
-                      </button>
+                      <button className="btn secondary" onClick={() => setInboundModal({ open: true, mode: 'edit', inbound: r })}>{tr('edit')}</button>
+                      <button className="btn secondary" onClick={() => setClientModal({ open: true, mode: 'add', inbound: r, client: null })}>+ {tr('clients')}</button>
                       <button className="btn danger" onClick={() => removeInbound(r.id)}>{tr('delete')}</button>
                     </td>
                   </tr>
                   {open && (
                     <tr>
-                      <td colSpan={10} style={{ padding: '0.5rem 0.75rem 1rem', background: 'var(--bg-elevated, transparent)' }}>
+                      <td colSpan={10} style={{ padding: '0.5rem 0.75rem 1rem' }}>
                         {clients.length === 0 ? (
-                          <p className="page-sub" style={{ margin: '0.5rem 0' }}>{tr('empty')}</p>
+                          <p className="page-sub" style={{ margin: '0.5rem 0' }}>
+                            {tr('empty')} —{' '}
+                            <button type="button" className="btn secondary" onClick={() => setClientModal({ open: true, mode: 'add', inbound: r, client: null })}>
+                              {tr('create')} {tr('clients')}
+                            </button>
+                          </p>
                         ) : (
                           <table className="table" style={{ margin: 0 }}>
                             <thead>
@@ -177,9 +181,7 @@ export function InboundsPage() {
                                   <td className="row-actions">
                                     <button className="btn secondary" onClick={() => showLink(c)}>{tr('link')}</button>
                                     <button className="btn secondary" onClick={() => showSub(c)}>{tr('subscription')}</button>
-                                    <button className="btn secondary" onClick={() => setClientModal({ open: true, mode: 'edit', inbound: r, client: c })}>
-                                      {tr('edit')}
-                                    </button>
+                                    <button className="btn secondary" onClick={() => setClientModal({ open: true, mode: 'edit', inbound: r, client: c })}>{tr('edit')}</button>
                                     <button className="btn danger" onClick={() => removeClient(c.id)}>{tr('delete')}</button>
                                   </td>
                                 </tr>
@@ -222,7 +224,14 @@ export function InboundsPage() {
         mode={inboundModal.mode}
         inbound={inboundModal.inbound}
         onClose={() => setInboundModal({ open: false, mode: 'add', inbound: null })}
-        onSaved={() => { void load() }}
+        onSaved={(created) => {
+          void load().then(() => {
+            if (inboundModal.mode === 'add' && created) {
+              setExpanded(created.id)
+              setPendingClientInbound(created)
+            }
+          })
+        }}
       />
 
       {clientModal.inbound && (

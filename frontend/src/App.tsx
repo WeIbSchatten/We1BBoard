@@ -4,6 +4,7 @@ import { api } from './api'
 import { AppProvider, useApp } from './AppContext'
 import { Layout } from './Layout'
 import { BridgesPage } from './pages/Bridges'
+import { ClientsPage } from './pages/Clients'
 import { DashboardPage } from './pages/Dashboard'
 import { InboundsPage } from './pages/Inbounds'
 import { LoginPage } from './pages/Login'
@@ -26,6 +27,7 @@ function Authed() {
       <Route element={<Layout />}>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/inbounds" element={<InboundsPage />} />
+        <Route path="/clients" element={<ClientsPage />} />
         <Route path="/outbounds" element={<OutboundsPage />} />
         <Route path="/bridges" element={<BridgesPage />} />
         <Route path="/nodes" element={<NodesPage />} />

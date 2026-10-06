@@ -5,6 +5,7 @@ import { api } from './api'
 const links = [
   ['/', 'dashboard', '◎'],
   ['/inbounds', 'inbounds', '⇢'],
+  ['/clients', 'clients', '◉'],
   ['/outbounds', 'outbounds', '⇠'],
   ['/bridges', 'bridges', '⇄'],
   ['/nodes', 'nodes', '⬡'],

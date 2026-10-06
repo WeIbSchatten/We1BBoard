@@ -8,22 +8,25 @@ import {
   SECURITIES,
   SS_METHODS,
   FINGERPRINTS,
+  applyRealityDefaults,
+  applyTlsDefaults,
   buildInboundSettings,
+  buildSniffing,
   buildStreamSettings,
   emptyInboundForm,
   parseInboundToForm,
-  suggestedFlow,
 } from '../lib/inboundForm'
+import { randomLowerAndNum, randomShortIds, randomSpiderX } from '../lib/random'
 
 type Props = {
   open: boolean
   mode: 'add' | 'edit'
   inbound: Inbound | null
   onClose: () => void
-  onSaved: () => void
+  onSaved: (created?: Inbound) => void
 }
 
-type Tab = 'general' | 'network' | 'security' | 'client'
+type Tab = 'general' | 'network' | 'security' | 'sniffing'
 
 export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Props) {
   const { tr } = useApp()
@@ -39,21 +42,29 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
     if (mode === 'edit' && inbound) {
       setForm(parseInboundToForm(inbound))
     } else {
-      const f = emptyInboundForm()
-      f.clientEmail = `user-${Date.now().toString(36)}@we1b`
-      setForm(f)
-      void refreshUUID()
+      setForm(emptyInboundForm())
     }
   }, [open, mode, inbound])
 
   function set<K extends keyof InboundFormState>(key: K, value: InboundFormState[K]) {
     setForm((prev) => {
-      const next = { ...prev, [key]: value }
-      if (key === 'security' || key === 'network' || key === 'protocol') {
-        const flow = suggestedFlow(next)
-        if (flow) next.clientFlow = flow
-        if (key === 'security' && value === 'reality' && !next.realityPrivateKey) {
+      let next = { ...prev, [key]: value }
+      if (key === 'protocol' && mode === 'add') {
+        if (value === 'shadowsocks') {
+          next.ssPassword = randomLowerAndNum(32)
+          next.ssMethod = '2022-blake3-aes-256-gcm'
+        }
+        if (['tun', 'tunnel', 'mtproto', 'tuic', 'hysteria2'].includes(String(value))) {
+          next.network = 'tcp'
+          next.security = 'none'
+        }
+      }
+      if (key === 'security') {
+        if (value === 'reality') {
+          next = applyRealityDefaults(next)
           queueMicrotask(() => { void refreshKeys() })
+        } else if (value === 'tls') {
+          next = applyTlsDefaults(next)
         }
       }
       return next
@@ -67,18 +78,12 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
         ...prev,
         realityPrivateKey: keys.privateKey,
         realityPublicKey: keys.publicKey,
-        realityShortId: keys.shortId,
+        realityShortIds: prev.realityShortIds || [keys.shortId, ...randomShortIds().slice(0, 7)].join(','),
+        realitySpiderX: prev.realitySpiderX && prev.realitySpiderX !== '/' ? prev.realitySpiderX : randomSpiderX(),
       }))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'keys error')
     }
-  }
-
-  async function refreshUUID() {
-    try {
-      const r = await api<{ uuid: string }>('/tools/uuid')
-      setForm((prev) => ({ ...prev, clientUUID: r.uuid }))
-    } catch { /* ignore */ }
   }
 
   async function submit(e: FormEvent) {
@@ -89,6 +94,12 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
       if (form.security === 'reality' && !form.realityPrivateKey) {
         throw new Error('Generate REALITY keys first')
       }
+      if (form.security === 'reality' && !form.realityDest) {
+        throw new Error('REALITY dest/target is required (e.g. www.cloudflare.com:443)')
+      }
+      if (form.security === 'reality' && !form.realitySNI) {
+        throw new Error('REALITY serverNames (SNI) is required')
+      }
       const payload = {
         remark: form.remark,
         port: form.port,
@@ -97,32 +108,15 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
         enable: form.enable,
         settings: buildInboundSettings(form),
         streamSettings: buildStreamSettings(form),
+        sniffing: buildSniffing(form),
       }
-      let created: Inbound
+      let saved: Inbound
       if (mode === 'edit' && form.id) {
-        created = await api<Inbound>(`/inbounds/${form.id}`, { method: 'PUT', body: JSON.stringify({ ...payload, id: form.id }) })
+        saved = await api<Inbound>(`/inbounds/${form.id}`, { method: 'PUT', body: JSON.stringify({ ...payload, id: form.id }) })
       } else {
-        created = await api<Inbound>('/inbounds', { method: 'POST', body: JSON.stringify(payload) })
-        if (!['tun', 'tunnel'].includes(form.protocol)) {
-          const flow = form.clientFlow || suggestedFlow(form)
-          await api('/clients', {
-            method: 'POST',
-            body: JSON.stringify({
-              inboundId: created.id,
-              email: form.clientEmail || `${form.protocol}-${form.port}@we1b`,
-              enable: true,
-              uuid: form.clientUUID || undefined,
-              password: form.clientPassword || undefined,
-              flow,
-              totalGB: form.clientTotalGB || 0,
-              expiryTime: form.clientExpiryDays > 0
-                ? Date.now() + form.clientExpiryDays * 86400000
-                : 0,
-            }),
-          })
-        }
+        saved = await api<Inbound>('/inbounds', { method: 'POST', body: JSON.stringify(payload) })
       }
-      onSaved()
+      onSaved(saved)
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'error')
@@ -138,7 +132,7 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
     { id: 'general', label: tr('tabGeneral') },
     { id: 'network', label: tr('tabNetwork'), show: needsStream },
     { id: 'security', label: tr('tabSecurity'), show: needsStream },
-    { id: 'client', label: tr('tabClient'), show: mode === 'add' && !['tun', 'tunnel'].includes(form.protocol) },
+    { id: 'sniffing', label: tr('tabSniffing'), show: needsStream },
   ]
 
   return (
@@ -171,16 +165,25 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
               </select>
             </div>
             <div className="field">
-              <label className="label">Listen</label>
-              <input className="input" value={form.listen} onChange={(e) => set('listen', e.target.value)} />
+              <label className="label">Listen <span className="hint">(empty = 0.0.0.0)</span></label>
+              <input className="input" value={form.listen} onChange={(e) => set('listen', e.target.value)} placeholder="0.0.0.0" />
             </div>
             {form.protocol === 'shadowsocks' && (
-              <div className="field">
-                <label className="label">Method</label>
-                <select className="select" value={form.ssMethod} onChange={(e) => set('ssMethod', e.target.value)}>
-                  {SS_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
-                </select>
-              </div>
+              <>
+                <div className="field">
+                  <label className="label">Method</label>
+                  <select className="select" value={form.ssMethod} onChange={(e) => set('ssMethod', e.target.value)}>
+                    {SS_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </div>
+                <div className="field">
+                  <label className="label">{tr('password')}</label>
+                  <div className="row-actions">
+                    <input className="input" value={form.ssPassword} onChange={(e) => set('ssPassword', e.target.value)} />
+                    <button type="button" className="btn secondary" onClick={() => set('ssPassword', randomLowerAndNum(32))}>↻</button>
+                  </div>
+                </div>
+              </>
             )}
             <div className="field">
               <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -196,7 +199,7 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
             <div className="field">
               <label className="label">{tr('network')}</label>
               <select className="select" value={form.network} onChange={(e) => set('network', e.target.value as InboundFormState['network'])}>
-                {NETWORKS.map((n) => <option key={n} value={n}>{n}</option>)}
+                {NETWORKS.map((n) => <option key={n} value={n}>{n === 'tcp' ? 'tcp (raw)' : n}</option>)}
               </select>
             </div>
             {form.network === 'ws' && (
@@ -243,7 +246,10 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
             {form.network === 'kcp' && (
               <div className="field">
                 <label className="label">Seed</label>
-                <input className="input" value={form.kcpSeed} onChange={(e) => set('kcpSeed', e.target.value)} />
+                <div className="row-actions">
+                  <input className="input" value={form.kcpSeed} onChange={(e) => set('kcpSeed', e.target.value)} />
+                  <button type="button" className="btn secondary" onClick={() => set('kcpSeed', randomLowerAndNum(8))}>↻</button>
+                </div>
               </div>
             )}
           </div>
@@ -258,24 +264,38 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
               </select>
             </div>
             {form.security === 'tls' && (
-              <div className="field">
-                <label className="label">SNI / serverName</label>
-                <input className="input" value={form.tlsSNI} onChange={(e) => set('tlsSNI', e.target.value)} />
+              <div className="grid2">
+                <div className="field">
+                  <label className="label">SNI / serverName</label>
+                  <input className="input" value={form.tlsSNI} onChange={(e) => set('tlsSNI', e.target.value)} />
+                </div>
+                <div className="field">
+                  <label className="label">ALPN</label>
+                  <input className="input" value={form.tlsALPN} onChange={(e) => set('tlsALPN', e.target.value)} placeholder="h2,http/1.1" />
+                </div>
+                <div className="field">
+                  <label className="label">Fingerprint</label>
+                  <select className="select" value={form.tlsFingerprint} onChange={(e) => set('tlsFingerprint', e.target.value)}>
+                    {FINGERPRINTS.map((fp) => <option key={fp} value={fp}>{fp}</option>)}
+                  </select>
+                </div>
               </div>
             )}
             {form.security === 'reality' && (
               <>
                 <div className="row-actions" style={{ marginBottom: 10 }}>
                   <button type="button" className="btn secondary" onClick={() => refreshKeys()}>{tr('genKeys')}</button>
+                  <button type="button" className="btn secondary" onClick={() => set('realityShortIds', randomShortIds().join(','))}>ShortIds</button>
+                  <button type="button" className="btn secondary" onClick={() => set('realitySpiderX', randomSpiderX())}>SpiderX</button>
                 </div>
                 <div className="grid2">
                   <div className="field">
-                    <label className="label">Dest (target)</label>
-                    <input className="input" value={form.realityDest} onChange={(e) => set('realityDest', e.target.value)} />
+                    <label className="label">Dest / target *</label>
+                    <input className="input" value={form.realityDest} onChange={(e) => set('realityDest', e.target.value)} placeholder="www.cloudflare.com:443" required={form.security === 'reality'} />
                   </div>
                   <div className="field">
-                    <label className="label">SNI / serverNames</label>
-                    <input className="input" value={form.realitySNI} onChange={(e) => set('realitySNI', e.target.value)} />
+                    <label className="label">ServerNames (SNI) *</label>
+                    <input className="input" value={form.realitySNI} onChange={(e) => set('realitySNI', e.target.value)} placeholder="www.cloudflare.com" />
                   </div>
                   <div className="field">
                     <label className="label">Private key</label>
@@ -285,9 +305,9 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
                     <label className="label">Public key</label>
                     <input className="input" value={form.realityPublicKey} onChange={(e) => set('realityPublicKey', e.target.value)} readOnly />
                   </div>
-                  <div className="field">
-                    <label className="label">Short ID</label>
-                    <input className="input" value={form.realityShortId} onChange={(e) => set('realityShortId', e.target.value)} />
+                  <div className="field" style={{ gridColumn: '1 / -1' }}>
+                    <label className="label">Short IDs (csv)</label>
+                    <input className="input" value={form.realityShortIds} onChange={(e) => set('realityShortIds', e.target.value)} />
                   </div>
                   <div className="field">
                     <label className="label">Fingerprint</label>
@@ -305,41 +325,23 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
           </div>
         )}
 
-        {tab === 'client' && mode === 'add' && (
+        {tab === 'sniffing' && needsStream && (
           <div className="grid2">
             <div className="field">
-              <label className="label">Email</label>
-              <input className="input" value={form.clientEmail} onChange={(e) => set('clientEmail', e.target.value)} />
+              <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input type="checkbox" checked={form.sniffEnabled} onChange={(e) => set('sniffEnabled', e.target.checked)} />
+                {tr('enable')} sniffing
+              </label>
             </div>
             <div className="field">
-              <label className="label">UUID</label>
-              <div className="row-actions">
-                <input className="input" value={form.clientUUID} onChange={(e) => set('clientUUID', e.target.value)} />
-                <button type="button" className="btn secondary" onClick={() => refreshUUID()}>UUID</button>
-              </div>
+              <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input type="checkbox" checked={form.sniffRouteOnly} onChange={(e) => set('sniffRouteOnly', e.target.checked)} />
+                routeOnly
+              </label>
             </div>
-            {(form.protocol === 'trojan' || form.protocol === 'shadowsocks') && (
-              <div className="field">
-                <label className="label">{tr('password')}</label>
-                <input className="input" value={form.clientPassword} onChange={(e) => set('clientPassword', e.target.value)} />
-              </div>
-            )}
-            {form.protocol === 'vless' && (
-              <div className="field">
-                <label className="label">Flow</label>
-                <select className="select" value={form.clientFlow} onChange={(e) => set('clientFlow', e.target.value)}>
-                  <option value="">(none)</option>
-                  <option value="xtls-rprx-vision">xtls-rprx-vision</option>
-                </select>
-              </div>
-            )}
-            <div className="field">
-              <label className="label">Total GB (0 = ∞)</label>
-              <input className="input" type="number" min={0} value={form.clientTotalGB} onChange={(e) => set('clientTotalGB', Number(e.target.value))} />
-            </div>
-            <div className="field">
-              <label className="label">Expiry days (0 = never)</label>
-              <input className="input" type="number" min={0} value={form.clientExpiryDays} onChange={(e) => set('clientExpiryDays', Number(e.target.value))} />
+            <div className="field" style={{ gridColumn: '1 / -1' }}>
+              <label className="label">destOverride (csv)</label>
+              <input className="input" value={form.sniffDestOverride} onChange={(e) => set('sniffDestOverride', e.target.value)} />
             </div>
           </div>
         )}
@@ -368,6 +370,7 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
           color: var(--accent);
           border-color: transparent;
         }
+        .hint { color: var(--text-muted); font-weight: 400; font-size: 0.8em; }
       `}</style>
     </div>
   )

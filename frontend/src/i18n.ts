@@ -52,6 +52,13 @@ const dict = {
     genKeys: 'Сгенерировать ключи',
     network: 'Сеть',
     security: 'Безопасность',
+    tabSniffing: 'Sniffing',
+    tabConfig: 'Конфиг',
+    inboundsHint: 'Создайте inbound, затем добавьте клиентов (как в 3x-ui)',
+    clientsHint: 'Пользователи всех inbound — создание, ссылки и подписки',
+    outboundsHint: 'Freedom / blackhole / proxy outbounds',
+    routingHint: 'Правила маршрутизации Xray',
+    bulkAdd: 'Массовое создание',
   },
   en: {
     brand: 'We1BBoard',
@@ -104,6 +111,13 @@ const dict = {
     genKeys: 'Generate keys',
     network: 'Network',
     security: 'Security',
+    tabSniffing: 'Sniffing',
+    tabConfig: 'Config',
+    inboundsHint: 'Create an inbound, then add clients (3x-ui style)',
+    clientsHint: 'Users across all inbounds — create, links and subscriptions',
+    outboundsHint: 'Freedom / blackhole / proxy outbounds',
+    routingHint: 'Xray routing rules',
+    bulkAdd: 'Bulk add',
   },
 } as const
 

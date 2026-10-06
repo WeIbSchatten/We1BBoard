@@ -46,6 +46,7 @@ export type Client = {
   up: number
   down: number
   comment: string
+  tgId?: number
 }
 
 export type Bridge = {
