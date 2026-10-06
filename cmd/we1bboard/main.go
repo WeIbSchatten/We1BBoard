@@ -21,6 +21,7 @@ import (
 	"github.com/we1bboard/we1bboard/internal/web/job"
 	"github.com/we1bboard/we1bboard/internal/web/service"
 	"github.com/we1bboard/we1bboard/internal/xray"
+	"github.com/we1bboard/we1bboard/internal/xrayinstall"
 )
 
 func main() {
@@ -38,7 +39,13 @@ func main() {
 	case "cert":
 		runCert(os.Args[2:])
 	case "version":
-		fmt.Println(config.Version)
+		fmt.Println(config.DisplayVersion())
+	case "install-xray":
+		ver := ""
+		if len(os.Args) >= 3 {
+			ver = os.Args[2]
+		}
+		runInstallXray(ver)
 	case "reset-admin":
 		if len(os.Args) >= 4 {
 			ensureDB()
@@ -52,7 +59,7 @@ func main() {
 		}
 		resetAdmin()
 	default:
-		fmt.Println("We1BBoard commands: run | menu | setting | cert | reset-admin | version")
+		fmt.Println("We1BBoard commands: run | menu | setting | cert | reset-admin | install-xray | version")
 	}
 }
 
@@ -61,12 +68,13 @@ func runServer() {
 	_ = os.MkdirAll(cfg.DataDir, 0o755)
 	_ = os.MkdirAll(cfg.BinDir, 0o755)
 	panellog.Init(cfg.DataDir)
-	panellog.Append("panel starting v%s", config.Version)
+	panellog.Append("panel starting %s", config.DisplayVersion())
 	if err := database.Init(cfg); err != nil {
 		fmt.Println("db error:", err)
 		panellog.Append("db init failed: %v", err)
 		os.Exit(1)
 	}
+	ensureXrayBinary(cfg)
 	xrayMgr := xray.NewManager(cfg.XrayBin, filepath.Join(cfg.DataDir, "xray"))
 	extraMgr := extra.NewManager(cfg.MtgBin, cfg.TUICBin, cfg.Hy2Bin, filepath.Join(cfg.DataDir, "extra"))
 	tgMgr := tgproxy.NewManager(cfg.TgProxyBin, filepath.Join(cfg.DataDir, "tgproxy"))
@@ -75,6 +83,7 @@ func runServer() {
 	_ = xrayMgr.WriteConfig()
 	if err := xrayMgr.Start(); err != nil {
 		fmt.Println("xray:", err)
+		panellog.Append("xray start failed: %v", err)
 	}
 	_ = extraMgr.SyncAll()
 	tgMgr.StartEnabled()
@@ -117,6 +126,7 @@ func runMenu() {
 		fmt.Println("6. Set theme (light/night/amoled)")
 		fmt.Println("7. Set accent (blue/purple)")
 		fmt.Println("8. Show certificate paths")
+		fmt.Println("9. Install / update Xray-core")
 		fmt.Println("0. Exit")
 		fmt.Print("Select: ")
 		line, _ := reader.ReadString('\n')
@@ -159,10 +169,42 @@ func runMenu() {
 		case "8":
 			ensureDB()
 			fmt.Printf("certFile=%s\nkeyFile=%s\n", database.GetSetting("certFile"), database.GetSetting("keyFile"))
+		case "9":
+			fmt.Print("Xray version (empty=latest): ")
+			p, _ := reader.ReadString('\n')
+			runInstallXray(strings.TrimSpace(p))
 		case "0":
 			return
 		}
 	}
+}
+
+func ensureXrayBinary(cfg *config.Config) {
+	if cfg == nil {
+		return
+	}
+	downloaded, res, err := xrayinstall.EnsureInstalled(cfg.BinDir, cfg.XrayBin)
+	if err != nil {
+		panellog.Append("xray binary missing (%s); auto-download failed: %v", cfg.XrayBin, err)
+		fmt.Println("xray:", err)
+		return
+	}
+	if downloaded && res != nil {
+		cfg.XrayBin = res.Bin
+		panellog.Append("auto-install xray: v%s (%d bytes) -> %s", res.Version, res.Bytes, res.Bin)
+		fmt.Printf("xray: installed v%s -> %s\n", res.Version, res.Bin)
+	}
+}
+
+func runInstallXray(version string) {
+	cfg := config.Load()
+	_ = os.MkdirAll(cfg.BinDir, 0o755)
+	res, err := xrayinstall.InstallLatest(cfg.BinDir, cfg.XrayBin, version)
+	if err != nil {
+		fmt.Println("install-xray:", err)
+		os.Exit(1)
+	}
+	fmt.Printf("xray v%s installed -> %s (%d bytes)\n", res.Version, res.Bin, res.Bytes)
 }
 
 func ensureDB() {

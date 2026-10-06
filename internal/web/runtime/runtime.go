@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/we1bboard/we1bboard/internal/tgproxy"
 	"github.com/we1bboard/we1bboard/internal/web/nodehist"
 	"github.com/we1bboard/we1bboard/internal/xray"
+	"github.com/we1bboard/we1bboard/internal/xrayinstall"
 )
 
 // Runtime applies config changes to local processes or remote nodes.
@@ -41,9 +43,9 @@ func (l *Local) Reload() error {
 			first = err
 			panellog.Append("reload: WriteConfig failed: %v", err)
 		}
-		if _, err := os.Stat(l.Xray.Bin); err != nil {
+		if err := l.ensureXrayBinary(); err != nil {
 			if first == nil {
-				panellog.Append("reload: xray binary missing (%s)", l.Xray.Bin)
+				first = err
 			}
 			if l.Extra != nil {
 				_ = l.Extra.SyncAll()
@@ -66,6 +68,28 @@ func (l *Local) Reload() error {
 		_ = l.Extra.SyncAll()
 	}
 	return first
+}
+
+// ensureXrayBinary downloads Xray-core once if the binary is missing (Linux).
+func (l *Local) ensureXrayBinary() error {
+	if l.Xray == nil || l.Xray.Bin == "" {
+		return nil
+	}
+	if _, err := os.Stat(l.Xray.Bin); err == nil {
+		return nil
+	}
+	binDir := filepath.Dir(l.Xray.Bin)
+	panellog.Append("reload: xray binary missing (%s); trying InstallLatestXray", l.Xray.Bin)
+	downloaded, res, err := xrayinstall.EnsureInstalled(binDir, l.Xray.Bin)
+	if err != nil {
+		panellog.Append("reload: auto-install xray failed: %v", err)
+		return fmt.Errorf("xray binary missing (%s): %w", l.Xray.Bin, err)
+	}
+	if downloaded && res != nil {
+		l.Xray.Bin = res.Bin
+		panellog.Append("reload: auto-install xray v%s -> %s", res.Version, res.Bin)
+	}
+	return nil
 }
 
 type Remote struct {

@@ -133,6 +133,16 @@ export function InboundsPage() {
         </div>
       </div>
 
+      {rows.length === 0 ? (
+        <div className="card">
+          <div className="empty-state">
+            <div>{tr('empty')}</div>
+            <button type="button" className="btn" onClick={() => setInboundModal({ open: true, mode: 'add', inbound: null })}>
+              {tr('create')}
+            </button>
+          </div>
+        </div>
+      ) : (
       <div className="card">
         <table className="table">
           <thead>
@@ -151,13 +161,6 @@ export function InboundsPage() {
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={11}>
-                  <div className="empty-state">{tr('empty')}</div>
-                </td>
-              </tr>
-            )}
             {rows.map((r) => {
               let net = '—'
               let sec = '—'
@@ -258,6 +261,7 @@ export function InboundsPage() {
           </tbody>
         </table>
       </div>
+      )}
 
       <ConfirmModal
         open={!!confirm}

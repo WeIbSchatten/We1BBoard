@@ -29,6 +29,13 @@ function formatUptime(sec?: number): string {
   return `${s}s`
 }
 
+/** Format bare config.Version as `v1.0.13` without doubling the prefix. */
+function formatPanelVersion(version?: string): string {
+  const v = (version || '').trim()
+  if (!v) return '—'
+  return v.startsWith('v') || v.startsWith('V') ? v : `v${v}`
+}
+
 function Sparkline({ values, color = 'var(--accent)' }: { values: number[]; color?: string }) {
   if (!values.length) {
     return <div className="sparkline empty" />
@@ -155,7 +162,7 @@ export function DashboardPage() {
           </div>
           <div className="hint">
             {xrayVer?.current ? `xray ${xrayVer.current} · ` : ''}
-            uptime {formatUptime(st?.xrayUptime)} · panel v{st?.version || '—'}
+            uptime {formatUptime(st?.xrayUptime)} · panel {formatPanelVersion(st?.version)}
           </div>
         </Link>
         <div className="stat">

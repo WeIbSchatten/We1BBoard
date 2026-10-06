@@ -53,42 +53,52 @@ export function HostsPage() {
         <button className="btn" onClick={() => setModal({ open: true, mode: 'add', host: emptyHost() })}>{tr('create')}</button>
       </div>
 
-      <div className="card">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>{tr('remark')}</th>
-              <th>Address</th>
-              <th>{tr('port')}</th>
-              <th>Inbound</th>
-              <th>SNI</th>
-              <th>{tr('status')}</th>
-              <th>{tr('actions')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 && <tr><td colSpan={7}>{tr('empty')}</td></tr>}
-            {rows.map((h) => (
-              <tr key={h.id}>
-                <td>{h.remark || '—'}</td>
-                <td><code style={{ fontFamily: 'var(--mono)', fontSize: '0.85rem' }}>{h.address}</code></td>
-                <td>{h.port || '↓'}</td>
-                <td>{inboundLabel(h)}</td>
-                <td>{h.sni || '—'}</td>
-                <td>
-                  <button className={`badge ${h.enable ? 'on' : 'off'}`} style={{ cursor: 'pointer', border: 'none' }} onClick={() => { void toggleEnable(h) }}>
-                    {h.enable ? tr('enable') : tr('disable')}
-                  </button>
-                </td>
-                <td className="row-actions">
-                  <button className="btn btn-sm secondary" onClick={() => setModal({ open: true, mode: 'edit', host: h })}>{tr('edit')}</button>
-                  <button className="btn btn-sm danger" onClick={() => setConfirmId(h.id)}>{tr('delete')}</button>
-                </td>
+      {rows.length === 0 ? (
+        <div className="card">
+          <div className="empty-state">
+            <div>{tr('empty')}</div>
+            <button type="button" className="btn" onClick={() => setModal({ open: true, mode: 'add', host: emptyHost() })}>
+              {tr('create')}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="card">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>{tr('remark')}</th>
+                <th>Address</th>
+                <th>{tr('port')}</th>
+                <th>Inbound</th>
+                <th>SNI</th>
+                <th>{tr('status')}</th>
+                <th>{tr('actions')}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {rows.map((h) => (
+                <tr key={h.id}>
+                  <td>{h.remark || '—'}</td>
+                  <td><code style={{ fontFamily: 'var(--mono)', fontSize: '0.85rem' }}>{h.address}</code></td>
+                  <td>{h.port || '↓'}</td>
+                  <td>{inboundLabel(h)}</td>
+                  <td>{h.sni || '—'}</td>
+                  <td>
+                    <button className={`badge ${h.enable ? 'on' : 'off'}`} style={{ cursor: 'pointer', border: 'none' }} onClick={() => { void toggleEnable(h) }}>
+                      {h.enable ? tr('enable') : tr('disable')}
+                    </button>
+                  </td>
+                  <td className="row-actions">
+                    <button className="btn btn-sm secondary" onClick={() => setModal({ open: true, mode: 'edit', host: h })}>{tr('edit')}</button>
+                    <button className="btn btn-sm danger" onClick={() => setConfirmId(h.id)}>{tr('delete')}</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <ConfirmModal
         open={confirmId != null}

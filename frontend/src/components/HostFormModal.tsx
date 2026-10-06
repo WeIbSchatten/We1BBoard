@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { api, type Host, type Inbound } from '../api'
 import { useApp } from '../AppContext'
+import { FormRow } from './FormRow'
 
 type Props = {
   open: boolean
@@ -80,34 +81,29 @@ export function HostFormModal({ open, mode, host, inbounds, onClose, onSaved }: 
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <form className="modal" style={{ width: 'min(640px, 100%)' }} onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+      <form className="modal modal--md" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         <h3>{mode === 'edit' ? tr('edit') : tr('create')} {tr('hosts')}</h3>
-        <div className="grid2">
-          <div className="field">
-            <label className="label">{tr('remark')}</label>
+
+        <div className="modal-body-scroll">
+          <FormRow label={tr('remark')}>
             <input className="input" value={form.remark} onChange={(e) => set('remark', e.target.value)} />
-          </div>
-          <div className="field">
-            <label className="label">Address *</label>
+          </FormRow>
+          <FormRow label="Address *">
             <input className="input" value={form.address} onChange={(e) => set('address', e.target.value)} required placeholder="cdn.example.com" />
-          </div>
-          <div className="field">
-            <label className="label">{tr('port')} (0 = inbound)</label>
-            <input className="input" type="number" min={0} max={65535} value={form.port} onChange={(e) => set('port', Number(e.target.value))} />
-          </div>
-          <div className="field">
-            <label className="label">Sort</label>
-            <input className="input" type="number" value={form.sortOrder} onChange={(e) => set('sortOrder', Number(e.target.value))} />
-          </div>
-          <div className="field" style={{ gridColumn: '1 / -1' }}>
-            <label className="label">Inbound (0 = all / use tag)</label>
+          </FormRow>
+          <FormRow label={tr('port')} hint="0 = use inbound port">
+            <input className="input input-number--compact" type="number" min={0} max={65535} value={form.port} onChange={(e) => set('port', Number(e.target.value))} />
+          </FormRow>
+          <FormRow label="Sort">
+            <input className="input input-number--compact" type="number" value={form.sortOrder} onChange={(e) => set('sortOrder', Number(e.target.value))} />
+          </FormRow>
+          <FormRow label="Inbound" hint="0 = all / use tag">
             <select
               className="select"
               value={form.inboundId}
               onChange={(e) => {
                 const id = Number(e.target.value)
-                const ib = inbounds.find((i) => i.id === id)
-                setForm((f) => ({ ...f, inboundId: id, inboundTag: id > 0 ? '' : f.inboundTag, ...(ib ? {} : {}) }))
+                setForm((f) => ({ ...f, inboundId: id, inboundTag: id > 0 ? '' : f.inboundTag }))
               }}
             >
               <option value={0}>{tr('allInbounds')}</option>
@@ -115,53 +111,57 @@ export function HostFormModal({ open, mode, host, inbounds, onClose, onSaved }: 
                 <option key={i.id} value={i.id}>#{i.id} {i.remark || i.tag} ({i.protocol}:{i.port})</option>
               ))}
             </select>
-          </div>
+          </FormRow>
           {form.inboundId === 0 && (
-            <div className="field" style={{ gridColumn: '1 / -1' }}>
-              <label className="label">Inbound tag (optional match)</label>
+            <FormRow label="Inbound tag" hint="Optional match">
               <input className="input" value={form.inboundTag} onChange={(e) => set('inboundTag', e.target.value)} placeholder="inbound-tag" list="host-inbound-tags" />
               <datalist id="host-inbound-tags">
                 {inbounds.map((i) => i.tag && <option key={i.id} value={i.tag} />)}
               </datalist>
-            </div>
+            </FormRow>
           )}
-          <div className="field">
-            <label className="label">SNI</label>
-            <input className="input" value={form.sni} onChange={(e) => set('sni', e.target.value)} />
+
+          <div className="form-section">
+            <div className="form-section__title">Stream overrides</div>
+            <div className="form-section__body">
+              <FormRow label="SNI">
+                <input className="input" value={form.sni} onChange={(e) => set('sni', e.target.value)} />
+              </FormRow>
+              <FormRow label="Host header">
+                <input className="input" value={form.hostHeader} onChange={(e) => set('hostHeader', e.target.value)} />
+              </FormRow>
+              <FormRow label="Path">
+                <input className="input" value={form.path} onChange={(e) => set('path', e.target.value)} />
+              </FormRow>
+              <FormRow label="ALPN">
+                <input className="input" value={form.alpn} onChange={(e) => set('alpn', e.target.value)} placeholder="h2,http/1.1" />
+              </FormRow>
+              <FormRow label="Fingerprint">
+                <input className="input" value={form.fingerprint} onChange={(e) => set('fingerprint', e.target.value)} placeholder="chrome" />
+              </FormRow>
+              <FormRow label="allowInsecure">
+                <label className="form-switch">
+                  <input type="checkbox" checked={form.allowInsecure} onChange={(e) => set('allowInsecure', e.target.checked)} />
+                  <span>{form.allowInsecure ? 'On' : 'Off'}</span>
+                </label>
+              </FormRow>
+            </div>
           </div>
-          <div className="field">
-            <label className="label">Host header</label>
-            <input className="input" value={form.hostHeader} onChange={(e) => set('hostHeader', e.target.value)} />
-          </div>
-          <div className="field">
-            <label className="label">Path</label>
-            <input className="input" value={form.path} onChange={(e) => set('path', e.target.value)} />
-          </div>
-          <div className="field">
-            <label className="label">ALPN</label>
-            <input className="input" value={form.alpn} onChange={(e) => set('alpn', e.target.value)} placeholder="h2,http/1.1" />
-          </div>
-          <div className="field">
-            <label className="label">Fingerprint</label>
-            <input className="input" value={form.fingerprint} onChange={(e) => set('fingerprint', e.target.value)} placeholder="chrome" />
-          </div>
-          <div className="field">
-            <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <input type="checkbox" checked={form.allowInsecure} onChange={(e) => set('allowInsecure', e.target.checked)} />
-              allowInsecure
-            </label>
-          </div>
-          <div className="field">
-            <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+
+          <FormRow label={tr('enable')}>
+            <label className="form-switch">
               <input type="checkbox" checked={form.enable} onChange={(e) => set('enable', e.target.checked)} />
-              {tr('enable')}
+              <span>{form.enable ? 'On' : 'Off'}</span>
             </label>
-          </div>
+          </FormRow>
         </div>
+
         {error && <p className="error">{error}</p>}
-        <div className="row-actions">
-          <button className="btn" type="submit" disabled={busy}>{busy ? '…' : tr('save')}</button>
-          <button className="btn secondary" type="button" onClick={onClose}>{tr('cancel')}</button>
+        <div className="form-actions">
+          <div className="form-actions__end">
+            <button className="btn secondary" type="button" onClick={onClose}>{tr('cancel')}</button>
+            <button className="btn" type="submit" disabled={busy}>{busy ? '…' : tr('save')}</button>
+          </div>
         </div>
       </form>
     </div>

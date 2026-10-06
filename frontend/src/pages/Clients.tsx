@@ -278,35 +278,43 @@ export function ClientsPage() {
         </div>
       </div>
 
-      <div className="card">
-        <table className="table">
-          <thead>
-            <tr>
-              <th style={{ width: 36 }}>
-                <input
-                  type="checkbox"
-                  checked={selected.length === rows.length && rows.length > 0}
-                  onChange={(e) => setSelected(e.target.checked ? rows.map((r) => r.id) : [])}
-                />
-              </th>
-              <th>Email</th>
-              <th>{tr('group')}</th>
-              <th>Inbound</th>
-              <th>UUID</th>
-              <th>Traffic</th>
-              <th>{tr('status')}</th>
-              <th>{tr('actions')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 && (
+      {rows.length === 0 ? (
+        <div className="card">
+          <div className="empty-state">
+            <div>{tr('empty')}</div>
+            <button
+              type="button"
+              className="btn"
+              disabled={clientInbounds.length === 0}
+              onClick={() => setModal({ open: true, mode: 'add', inbound: null, client: null })}
+            >
+              {tr('create')}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="card">
+          <table className="table">
+            <thead>
               <tr>
-                <td colSpan={8}>
-                  <div className="empty-state">{tr('empty')}</div>
-                </td>
+                <th style={{ width: 36 }}>
+                  <input
+                    type="checkbox"
+                    checked={selected.length === rows.length && rows.length > 0}
+                    onChange={(e) => setSelected(e.target.checked ? rows.map((r) => r.id) : [])}
+                  />
+                </th>
+                <th>Email</th>
+                <th>{tr('group')}</th>
+                <th>Inbound</th>
+                <th>UUID</th>
+                <th>Traffic</th>
+                <th>{tr('status')}</th>
+                <th>{tr('actions')}</th>
               </tr>
-            )}
-            {rows.map((c) => (
+            </thead>
+            <tbody>
+              {rows.map((c) => (
                 <tr key={c.id}>
                   <td>
                     <input
@@ -340,9 +348,10 @@ export function ClientsPage() {
                   </td>
                 </tr>
               ))}
-          </tbody>
-        </table>
-      </div>
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <ConfirmModal
         open={!!confirm}

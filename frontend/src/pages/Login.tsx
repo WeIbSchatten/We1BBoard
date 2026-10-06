@@ -36,17 +36,18 @@ export function LoginPage() {
         <div className="login-brand">We1BBoard</div>
         <p className="login-lead">{tr('welcome')}</p>
         <div className="field">
-          <label className="label">{tr('username')}</label>
-          <input className="input" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
+          <label className="login-label" htmlFor="login-user">{tr('username')}</label>
+          <input id="login-user" className="input" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
         </div>
         <div className="field">
-          <label className="label">{tr('password')}</label>
-          <input className="input" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          <label className="login-label" htmlFor="login-pass">{tr('password')}</label>
+          <input id="login-pass" className="input" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         </div>
         {(need2fa || code) && (
           <div className="field">
-            <label className="label">2FA code</label>
+            <label className="login-label" htmlFor="login-2fa">{tr('twoFactorCode')}</label>
             <input
+              id="login-2fa"
               className="input"
               inputMode="numeric"
               autoComplete="one-time-code"
@@ -109,6 +110,13 @@ export function LoginPage() {
           margin: 0 0 1.4rem;
           color: var(--text-muted);
           font-size: 1rem;
+        }
+        .login-label {
+          display: block;
+          margin-bottom: 0.4rem;
+          color: var(--text-muted);
+          font-size: 0.88rem;
+          font-weight: 600;
         }
         .login-btn { width: 100%; margin-top: 0.25rem; padding: 0.8rem 1rem; font-size: 1rem; }
       `}</style>

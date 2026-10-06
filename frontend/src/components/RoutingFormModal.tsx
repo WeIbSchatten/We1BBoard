@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react'
 import { api, type Inbound, type Outbound } from '../api'
 import { useApp } from '../AppContext'
 import { appendCsv, csvHas, DOMAIN_CHIPS, IP_CHIPS } from '../lib/routingChips'
+import { FormRow } from './FormRow'
 import { GeoBrowserModal } from './GeoBrowserModal'
 
 export type RoutingRule = {
@@ -117,135 +118,136 @@ export function RoutingFormModal({ open, mode, rule, inbounds, outbounds, onClos
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <form className="modal" style={{ width: 'min(680px, 100%)' }} onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+      <form className="modal modal--md" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         <h3>{mode === 'edit' ? tr('edit') : tr('create')} {tr('routing')}</h3>
-        <div className="grid2">
-          <div className="field">
-            <label className="label">{tr('remark')}</label>
+
+        <div className="modal-body-scroll">
+          <FormRow label={tr('remark')}>
             <input className="input" value={form.remark} onChange={(e) => setForm({ ...form, remark: e.target.value })} />
-          </div>
-          <div className="field">
-            <label className="label">Priority</label>
-            <input className="input" type="number" value={form.priority} onChange={(e) => setForm({ ...form, priority: Number(e.target.value) })} />
-          </div>
-          <div className="field">
-            <label className="label">Inbound tag</label>
-            <select className="select" value={form.inboundTag} onChange={(e) => setForm({ ...form, inboundTag: e.target.value })}>
-              <option value="">* (any)</option>
-              {inboundTags.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
-            <input className="input" style={{ marginTop: 6 }} placeholder="or type custom / csv" value={form.inboundTag} onChange={(e) => setForm({ ...form, inboundTag: e.target.value })} />
-          </div>
-          <div className="field">
-            <label className="label">Outbound tag {form.balancerTag ? '' : '*'}</label>
-            <select
-              className="select"
-              value={form.outboundTag}
-              onChange={(e) => setForm({ ...form, outboundTag: e.target.value, balancerTag: '' })}
-              required={!form.balancerTag}
-              disabled={!!form.balancerTag}
-            >
-              {outboundTags.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-          <div className="field">
-            <label className="label">Balancer tag</label>
-            <select
-              className="select"
-              value={form.balancerTag}
-              onChange={(e) => setForm({
-                ...form,
-                balancerTag: e.target.value,
-                outboundTag: e.target.value ? '' : (form.outboundTag || 'direct'),
-              })}
-            >
-              <option value="">— (use outbound)</option>
-              {balancerTags.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
-            {balancerTags.length === 0 && (
-              <p className="page-sub" style={{ margin: '6px 0 0' }}>Add balancers on Xray page first</p>
-            )}
-          </div>
-          <div className="field" style={{ gridColumn: '1 / -1' }}>
-            <label className="label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-              <span>Domain (csv / geosite:)</span>
-              <button
-                type="button"
-                className="btn secondary"
-                style={{ padding: '0.25rem 0.65rem', fontSize: '0.8rem' }}
-                onClick={() => { setGeoKind('geosite'); setGeoOpen(true) }}
-              >
-                {tr('geoBrowser')}
-              </button>
-            </label>
-            <input className="input" value={form.domain} onChange={(e) => setForm({ ...form, domain: e.target.value })} placeholder="geosite:google, domain:example.com" />
-            <div className="chip-row">
-              {DOMAIN_CHIPS.map((v) => (
-                <button
-                  key={v}
-                  type="button"
-                  className={`chip${csvHas(form.domain, v) ? ' active' : ''}`}
-                  onClick={() => setForm({ ...form, domain: appendCsv(form.domain, v) })}
-                >
-                  {v}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="field" style={{ gridColumn: '1 / -1' }}>
-            <label className="label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-              <span>IP (csv / geoip:)</span>
-              <button
-                type="button"
-                className="btn secondary"
-                style={{ padding: '0.25rem 0.65rem', fontSize: '0.8rem' }}
-                onClick={() => { setGeoKind('geoip'); setGeoOpen(true) }}
-              >
-                {tr('geoBrowser')}
-              </button>
-            </label>
-            <input className="input" value={form.ip} onChange={(e) => setForm({ ...form, ip: e.target.value })} placeholder="geoip:cn, 1.1.1.1/32" />
-            <div className="chip-row">
-              {IP_CHIPS.map((v) => (
-                <button
-                  key={v}
-                  type="button"
-                  className={`chip${csvHas(form.ip, v) ? ' active' : ''}`}
-                  onClick={() => setForm({ ...form, ip: appendCsv(form.ip, v) })}
-                >
-                  {v}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="field">
-            <label className="label">Port</label>
-            <input className="input" value={form.port} onChange={(e) => setForm({ ...form, port: e.target.value })} placeholder="80,443,1000-2000" />
-          </div>
-          <div className="field">
-            <label className="label">Network</label>
-            <select className="select" value={form.network} onChange={(e) => setForm({ ...form, network: e.target.value })}>
-              <option value="">any</option>
-              <option value="tcp">tcp</option>
-              <option value="udp">udp</option>
-              <option value="tcp,udp">tcp,udp</option>
-            </select>
-          </div>
-          <div className="field">
-            <label className="label">L7 protocol (csv)</label>
-            <input className="input" value={form.protocol} onChange={(e) => setForm({ ...form, protocol: e.target.value })} placeholder="http,tls,bittorrent,quic" />
-          </div>
-          <div className="field">
-            <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          </FormRow>
+          <FormRow label="Priority">
+            <input className="input input-number--compact" type="number" value={form.priority} onChange={(e) => setForm({ ...form, priority: Number(e.target.value) })} />
+          </FormRow>
+          <FormRow label={tr('enable')}>
+            <label className="form-switch">
               <input type="checkbox" checked={form.enable} onChange={(e) => setForm({ ...form, enable: e.target.checked })} />
-              {tr('enable')}
+              <span>{form.enable ? 'On' : 'Off'}</span>
             </label>
+          </FormRow>
+
+          <div className="form-section">
+            <div className="form-section__title">Match</div>
+            <div className="form-section__body">
+              <FormRow label="Inbound tag">
+                <select className="select" value={form.inboundTag} onChange={(e) => setForm({ ...form, inboundTag: e.target.value })}>
+                  <option value="">* (any)</option>
+                  {inboundTags.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+                <input className="input" style={{ marginTop: 6 }} placeholder="or type custom / csv" value={form.inboundTag} onChange={(e) => setForm({ ...form, inboundTag: e.target.value })} />
+              </FormRow>
+              <FormRow label={form.balancerTag ? 'Outbound tag' : 'Outbound tag *'}>
+                <select
+                  className="select"
+                  value={form.outboundTag}
+                  onChange={(e) => setForm({ ...form, outboundTag: e.target.value, balancerTag: '' })}
+                  required={!form.balancerTag}
+                  disabled={!!form.balancerTag}
+                >
+                  {outboundTags.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </FormRow>
+              <FormRow label="Balancer tag" hint={balancerTags.length === 0 ? 'Add balancers on Xray page first' : undefined}>
+                <select
+                  className="select"
+                  value={form.balancerTag}
+                  onChange={(e) => setForm({
+                    ...form,
+                    balancerTag: e.target.value,
+                    outboundTag: e.target.value ? '' : (form.outboundTag || 'direct'),
+                  })}
+                >
+                  <option value="">— (use outbound)</option>
+                  {balancerTags.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </FormRow>
+            </div>
+          </div>
+
+          <div className="form-section">
+            <div className="form-section__title">Criteria</div>
+            <div className="form-section__body">
+              <FormRow label="Domain">
+                <div className="input-compact" style={{ marginBottom: 6 }}>
+                  <input className="input" value={form.domain} onChange={(e) => setForm({ ...form, domain: e.target.value })} placeholder="geosite:google, domain:example.com" />
+                  <button
+                    type="button"
+                    className="btn secondary btn-sm"
+                    onClick={() => { setGeoKind('geosite'); setGeoOpen(true) }}
+                  >
+                    {tr('geoBrowser')}
+                  </button>
+                </div>
+                <div className="chip-row">
+                  {DOMAIN_CHIPS.map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      className={`chip${csvHas(form.domain, v) ? ' active' : ''}`}
+                      onClick={() => setForm({ ...form, domain: appendCsv(form.domain, v) })}
+                    >
+                      {v}
+                    </button>
+                  ))}
+                </div>
+              </FormRow>
+              <FormRow label="IP">
+                <div className="input-compact" style={{ marginBottom: 6 }}>
+                  <input className="input" value={form.ip} onChange={(e) => setForm({ ...form, ip: e.target.value })} placeholder="geoip:cn, 1.1.1.1/32" />
+                  <button
+                    type="button"
+                    className="btn secondary btn-sm"
+                    onClick={() => { setGeoKind('geoip'); setGeoOpen(true) }}
+                  >
+                    {tr('geoBrowser')}
+                  </button>
+                </div>
+                <div className="chip-row">
+                  {IP_CHIPS.map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      className={`chip${csvHas(form.ip, v) ? ' active' : ''}`}
+                      onClick={() => setForm({ ...form, ip: appendCsv(form.ip, v) })}
+                    >
+                      {v}
+                    </button>
+                  ))}
+                </div>
+              </FormRow>
+              <FormRow label="Port">
+                <input className="input" value={form.port} onChange={(e) => setForm({ ...form, port: e.target.value })} placeholder="80,443,1000-2000" />
+              </FormRow>
+              <FormRow label="Network">
+                <select className="select" value={form.network} onChange={(e) => setForm({ ...form, network: e.target.value })}>
+                  <option value="">any</option>
+                  <option value="tcp">tcp</option>
+                  <option value="udp">udp</option>
+                  <option value="tcp,udp">tcp,udp</option>
+                </select>
+              </FormRow>
+              <FormRow label="L7 protocol" hint="Comma-separated">
+                <input className="input" value={form.protocol} onChange={(e) => setForm({ ...form, protocol: e.target.value })} placeholder="http,tls,bittorrent,quic" />
+              </FormRow>
+            </div>
           </div>
         </div>
+
         {error && <p className="error">{error}</p>}
-        <div className="row-actions">
-          <button className="btn" type="submit" disabled={busy}>{busy ? '…' : tr('save')}</button>
-          <button className="btn secondary" type="button" onClick={onClose}>{tr('cancel')}</button>
+        <div className="form-actions">
+          <div className="form-actions__end">
+            <button className="btn secondary" type="button" onClick={onClose}>{tr('cancel')}</button>
+            <button className="btn" type="submit" disabled={busy}>{busy ? '…' : tr('save')}</button>
+          </div>
         </div>
       </form>
       <GeoBrowserModal

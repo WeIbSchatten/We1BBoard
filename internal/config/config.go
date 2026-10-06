@@ -7,8 +7,19 @@ import (
 	"strings"
 )
 
-// Version is overwritten at release build via -ldflags.
+// Version is overwritten at release build via -ldflags (semver without leading "v").
+// Git tags are "v1.0.12"; the workflow strips the "v" before ldflags.
 var Version = "1.0.0"
+
+// DisplayVersion returns Version with exactly one leading "v" (e.g. "v1.0.12").
+func DisplayVersion() string {
+	v := strings.TrimSpace(Version)
+	v = strings.TrimPrefix(v, "v")
+	if v == "" {
+		return "v0.0.0"
+	}
+	return "v" + v
+}
 
 type Config struct {
 	DataDir    string

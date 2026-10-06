@@ -140,7 +140,7 @@ func (a *API) UpdateInfo(c *gin.Context) {
 		return
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "We1BBoard/"+config.Version)
+	req.Header.Set("User-Agent", "We1BBoard/"+config.DisplayVersion())
 	resp, err := client.Do(req)
 	if err != nil {
 		fail(c, 502, fmt.Errorf("github: %w", err))

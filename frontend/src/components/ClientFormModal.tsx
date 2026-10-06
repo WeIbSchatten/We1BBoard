@@ -3,6 +3,7 @@ import { api, type Client, type Inbound } from '../api'
 import { useApp } from '../AppContext'
 import { inboundSupportsClients, parseInboundToForm, suggestedFlow } from '../lib/inboundForm'
 import { randomLowerAndNum, randomUUID } from '../lib/random'
+import { FormRow } from './FormRow'
 
 type Props = {
   open: boolean
@@ -174,8 +175,8 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, groupNa
   if (!open) return null
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <form className="modal" style={{ width: 'min(640px, 100%)' }} onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+    <div className="modal-backdrop modal-backdrop--top" onClick={onClose}>
+      <form className="modal modal--md" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         <h3>{mode === 'edit' ? tr('edit') : tr('create')} {tr('clients')}</h3>
         <div className="tabs">
           <button type="button" className={`tab ${tab === 'basic' ? 'active' : ''}`} onClick={() => setTab('basic')}>{tr('tabGeneral')}</button>
@@ -183,155 +184,142 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, groupNa
           <button type="button" className={`tab ${tab === 'links' ? 'active' : ''}`} onClick={() => setTab('links')}>Links</button>
         </div>
 
-        {tab === 'basic' && (
-          <div className="grid2">
-            {!(mode === 'add' && inbound) && (
-              <div className="field" style={{ gridColumn: '1 / -1' }}>
-                <label className="label">Inbounds (multi)</label>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 160, overflow: 'auto', padding: 8, border: '1px solid var(--border)', borderRadius: 8 }}>
-                  {eligibleInbounds.length === 0 && <span className="page-sub">No eligible inbounds</span>}
-                  {eligibleInbounds.map((i) => (
-                    <label key={i.id} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                      <input
-                        type="checkbox"
-                        checked={selectedInboundIds.includes(i.id)}
-                        onChange={() => toggleInbound(i.id)}
-                      />
-                      <span>#{i.id} {i.remark || i.tag} ({i.protocol}:{i.port})</span>
-                    </label>
-                  ))}
+        <div className="modal-body-scroll">
+          {tab === 'basic' && (
+            <div>
+              {!(mode === 'add' && inbound) && (
+                <FormRow stack label="Inbounds (multi)">
+                  <div className="check-list">
+                    {eligibleInbounds.length === 0 && <span className="page-sub">No eligible inbounds</span>}
+                    {eligibleInbounds.map((i) => (
+                      <label key={i.id} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedInboundIds.includes(i.id)}
+                          onChange={() => toggleInbound(i.id)}
+                        />
+                        <span>#{i.id} {i.remark || i.tag} ({i.protocol}:{i.port})</span>
+                      </label>
+                    ))}
+                  </div>
+                </FormRow>
+              )}
+              {mode === 'add' && inbound && (
+                <FormRow stack label="Inbound">
+                  <input className="input" readOnly value={`#${inbound.id} ${inbound.remark || inbound.tag} (${inbound.protocol}:${inbound.port})`} />
+                </FormRow>
+              )}
+
+              <div className="form-grid">
+                <FormRow stack label="Email">
+                  <div className="input-compact">
+                    <input className="input" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                    <button type="button" className="btn secondary btn-sm" onClick={() => setEmail(freshEmail())}>↻</button>
+                  </div>
+                </FormRow>
+                <FormRow stack label="Total GB" hint="0 = unlimited">
+                  <input className="input" type="number" min={0} value={totalGB} onChange={(e) => setTotalGB(Number(e.target.value))} />
+                </FormRow>
+                <FormRow stack label="Limit IP" hint="0 = unlimited">
+                  <input className="input" type="number" min={0} value={limitIp} onChange={(e) => setLimitIp(Number(e.target.value))} />
+                </FormRow>
+                <FormRow stack label="Limit HWID" hint="0 = unlimited">
+                  <input className="input" type="number" min={0} value={limitHwid} onChange={(e) => setLimitHwid(Number(e.target.value))} />
+                </FormRow>
+                <FormRow stack label="Expiry days" hint="0 = never">
+                  <input className="input" type="number" min={0} value={expiryDays} onChange={(e) => setExpiryDays(Number(e.target.value))} />
+                </FormRow>
+                <FormRow stack label="Traffic reset">
+                  <select className="select" value={trafficReset} onChange={(e) => setTrafficReset(e.target.value)}>
+                    <option value="never">never</option>
+                    <option value="daily">daily</option>
+                    <option value="weekly">weekly</option>
+                    <option value="monthly">monthly</option>
+                  </select>
+                </FormRow>
+                <FormRow stack label="Telegram ID">
+                  <input className="input" type="number" value={tgId} onChange={(e) => setTgId(Number(e.target.value))} />
+                </FormRow>
+                <FormRow stack label="Comment">
+                  <input className="input" value={comment} onChange={(e) => setComment(e.target.value)} />
+                </FormRow>
+                <FormRow stack label={tr('group')}>
+                  <input
+                    className="input"
+                    list="client-group-names"
+                    value={group}
+                    onChange={(e) => setGroup(e.target.value)}
+                    placeholder={tr('groupName')}
+                  />
+                  <datalist id="client-group-names">
+                    {(groupNames || []).map((g) => (
+                      <option key={g} value={g} />
+                    ))}
+                  </datalist>
+                </FormRow>
+                <FormRow stack label={tr('enable')}>
+                  <label className="form-switch">
+                    <input type="checkbox" checked={enable} onChange={(e) => setEnable(e.target.checked)} />
+                    <span>{enable ? 'Enabled' : 'Disabled'}</span>
+                  </label>
+                </FormRow>
+              </div>
+            </div>
+          )}
+
+          {tab === 'config' && (
+            <div>
+              <FormRow stack label="UUID">
+                <div className="input-compact">
+                  <input className="input" value={uuid} onChange={(e) => setUuid(e.target.value)} />
+                  <button type="button" className="btn secondary btn-sm" onClick={() => setUuid(randomUUID())}>↻</button>
                 </div>
-              </div>
-            )}
-            {mode === 'add' && inbound && (
-              <div className="field" style={{ gridColumn: '1 / -1' }}>
-                <label className="label">Inbound</label>
-                <input className="input" readOnly value={`#${inbound.id} ${inbound.remark || inbound.tag} (${inbound.protocol}:${inbound.port})`} />
-              </div>
-            )}
-            <div className="field">
-              <label className="label">Email</label>
-              <div className="row-actions">
-                <input className="input" value={email} onChange={(e) => setEmail(e.target.value)} required />
-                <button type="button" className="btn secondary" onClick={() => setEmail(freshEmail())}>↻</button>
-              </div>
+              </FormRow>
+              <FormRow stack label="Sub ID" hint="At least 16 characters">
+                <div className="input-compact">
+                  <input className="input" value={subId} onChange={(e) => setSubId(e.target.value)} />
+                  <button type="button" className="btn secondary btn-sm" onClick={() => setSubId(randomLowerAndNum(16))}>↻</button>
+                </div>
+              </FormRow>
+              <FormRow stack label={tr('password')}>
+                <div className="input-compact">
+                  <input className="input" value={password} onChange={(e) => setPassword(e.target.value)} />
+                  <button type="button" className="btn secondary btn-sm" onClick={() => setPassword(randomLowerAndNum(16))}>↻</button>
+                </div>
+              </FormRow>
+              {(protocol === 'vless' || !protocol) && (
+                <FormRow stack label="Flow">
+                  <select className="select" value={flow} onChange={(e) => setFlow(e.target.value)}>
+                    <option value="">(none)</option>
+                    <option value="xtls-rprx-vision">xtls-rprx-vision</option>
+                    <option value="xtls-rprx-vision-udp443">xtls-rprx-vision-udp443</option>
+                  </select>
+                </FormRow>
+              )}
             </div>
-            <div className="field">
-              <label className="label">Total GB (0 = ∞)</label>
-              <input className="input" type="number" min={0} value={totalGB} onChange={(e) => setTotalGB(Number(e.target.value))} />
-            </div>
-            <div className="field">
-              <label className="label">Limit IP (0 = ∞)</label>
-              <input className="input" type="number" min={0} value={limitIp} onChange={(e) => setLimitIp(Number(e.target.value))} />
-            </div>
-            <div className="field">
-              <label className="label">Limit HWID (0 = ∞)</label>
-              <input className="input" type="number" min={0} value={limitHwid} onChange={(e) => setLimitHwid(Number(e.target.value))} />
-            </div>
-            <div className="field">
-              <label className="label">Expiry days (0 = never)</label>
-              <input className="input" type="number" min={0} value={expiryDays} onChange={(e) => setExpiryDays(Number(e.target.value))} />
-            </div>
-            <div className="field">
-              <label className="label">Traffic reset</label>
-              <select className="select" value={trafficReset} onChange={(e) => setTrafficReset(e.target.value)}>
-                <option value="never">never</option>
-                <option value="daily">daily</option>
-                <option value="weekly">weekly</option>
-                <option value="monthly">monthly</option>
-              </select>
-            </div>
-            <div className="field">
-              <label className="label">Telegram ID</label>
-              <input className="input" type="number" value={tgId} onChange={(e) => setTgId(Number(e.target.value))} />
-            </div>
-            <div className="field">
-              <label className="label">Comment</label>
-              <input className="input" value={comment} onChange={(e) => setComment(e.target.value)} />
-            </div>
-            <div className="field">
-              <label className="label">{tr('group')}</label>
-              <input
-                className="input"
-                list="client-group-names"
-                value={group}
-                onChange={(e) => setGroup(e.target.value)}
-                placeholder={tr('groupName')}
+          )}
+
+          {tab === 'links' && (
+            <FormRow stack label="Extra share links" hint="One per line — appended to subscription">
+              <textarea
+                className="textarea"
+                rows={8}
+                value={extraLinks}
+                onChange={(e) => setExtraLinks(e.target.value)}
+                placeholder={'vless://...\nss://...'}
               />
-              <datalist id="client-group-names">
-                {(groupNames || []).map((g) => (
-                  <option key={g} value={g} />
-                ))}
-              </datalist>
-            </div>
-            <div className="field">
-              <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <input type="checkbox" checked={enable} onChange={(e) => setEnable(e.target.checked)} />
-                {tr('enable')}
-              </label>
-            </div>
-          </div>
-        )}
-
-        {tab === 'config' && (
-          <div className="grid2">
-            <div className="field">
-              <label className="label">UUID</label>
-              <div className="row-actions">
-                <input className="input" value={uuid} onChange={(e) => setUuid(e.target.value)} />
-                <button type="button" className="btn secondary" onClick={() => setUuid(randomUUID())}>↻</button>
-              </div>
-            </div>
-            <div className="field">
-              <label className="label">Sub ID (≥16)</label>
-              <div className="row-actions">
-                <input className="input" value={subId} onChange={(e) => setSubId(e.target.value)} />
-                <button type="button" className="btn secondary" onClick={() => setSubId(randomLowerAndNum(16))}>↻</button>
-              </div>
-            </div>
-            <div className="field">
-              <label className="label">{tr('password')}</label>
-              <div className="row-actions">
-                <input className="input" value={password} onChange={(e) => setPassword(e.target.value)} />
-                <button type="button" className="btn secondary" onClick={() => setPassword(randomLowerAndNum(16))}>↻</button>
-              </div>
-            </div>
-            {(protocol === 'vless' || !protocol) && (
-              <div className="field">
-                <label className="label">Flow</label>
-                <select className="select" value={flow} onChange={(e) => setFlow(e.target.value)}>
-                  <option value="">(none)</option>
-                  <option value="xtls-rprx-vision">xtls-rprx-vision</option>
-                  <option value="xtls-rprx-vision-udp443">xtls-rprx-vision-udp443</option>
-                </select>
-              </div>
-            )}
-          </div>
-        )}
-
-        {tab === 'links' && (
-          <div className="field">
-            <label className="label">Extra share links <span className="hint">(one per line — appended to subscription)</span></label>
-            <textarea
-              className="input"
-              rows={8}
-              value={extraLinks}
-              onChange={(e) => setExtraLinks(e.target.value)}
-              placeholder={'vless://...\nss://...'}
-              style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: '0.85rem' }}
-            />
-          </div>
-        )}
+            </FormRow>
+          )}
+        </div>
 
         {error && <p className="error">{error}</p>}
-        <div className="row-actions">
-          <button className="btn" type="submit" disabled={busy}>{busy ? '…' : tr('save')}</button>
-          <button className="btn secondary" type="button" onClick={onClose}>{tr('cancel')}</button>
+        <div className="form-actions">
+          <div className="form-actions__end">
+            <button className="btn secondary" type="button" onClick={onClose}>{tr('cancel')}</button>
+            <button className="btn" type="submit" disabled={busy}>{busy ? '…' : tr('save')}</button>
+          </div>
         </div>
       </form>
-      <style>{`
-        .hint { color: var(--text-muted); font-weight: 400; font-size: 0.8em; }
-      `}</style>
     </div>
   )
 }

@@ -254,6 +254,55 @@ EOF
   chmod 600 "${ENV_FILE}"
 }
 
+# Download Xray-core into WE1B_BIN_DIR (uses panel CLI when available).
+install_xray() {
+  mkdir -p "${INSTALL_DIR}/bin"
+  export WE1B_DATA_DIR="${DATA_DIR}"
+  export WE1B_BIN_DIR="${INSTALL_DIR}/bin"
+  # shellcheck disable=SC1090
+  [[ -f "${ENV_FILE}" ]] && set -a && source "${ENV_FILE}" && set +a
+
+  if [[ -x "${PANEL_BIN}" ]]; then
+    if "${PANEL_BIN}" install-xray && [[ -x "${INSTALL_DIR}/bin/xray" ]]; then
+      log "Xray-core installed via panel CLI -> ${INSTALL_DIR}/bin/xray"
+      return 0
+    fi
+  fi
+
+  # Fallback: GitHub release (same assets as panel install-xray)
+  local arch asset url tmp
+  arch="$(detect_arch)"
+  case "${arch}" in
+    amd64) asset="Xray-linux-64.zip" ;;
+    arm64) asset="Xray-linux-arm64-v8a.zip" ;;
+    *) warn "unsupported arch for xray: ${arch}"; return 1 ;;
+  esac
+  local tag
+  tag="$(curl -fsSL -H 'Accept: application/vnd.github+json' \
+    https://api.github.com/repos/XTLS/Xray-core/releases/latest \
+    | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+  if [[ -z "${tag}" ]]; then
+    warn "Could not resolve latest Xray-core tag — panel will auto-download on start"
+    return 0
+  fi
+  url="https://github.com/XTLS/Xray-core/releases/download/${tag}/${asset}"
+  tmp="$(mktemp -d)"
+  log "Downloading Xray-core ${tag}: ${url}"
+  if ! curl -fL --retry 3 --retry-delay 2 -o "${tmp}/${asset}" "${url}"; then
+    warn "Xray download failed — panel will auto-download on start"
+    rm -rf "${tmp}"
+    return 0
+  fi
+  if ! unzip -o -q "${tmp}/${asset}" "xray" -d "${tmp}"; then
+    warn "Xray unzip failed — panel will auto-download on start"
+    rm -rf "${tmp}"
+    return 0
+  fi
+  install -m 755 "${tmp}/xray" "${INSTALL_DIR}/bin/xray"
+  rm -rf "${tmp}"
+  log "Xray-core ${tag} -> ${INSTALL_DIR}/bin/xray"
+}
+
 write_service() {
   cat > "${SERVICE_PATH}" <<EOF
 [Unit]
@@ -618,6 +667,7 @@ print_access() {
   echo -e "│ ${BLUE}we1bboard restart${NC}      - Restart                      │"
   echo -e "│ ${BLUE}we1bboard status${NC}       - Status                       │"
   echo -e "│ ${BLUE}we1bboard update${NC}       - Update to latest             │"
+  echo -e "│ ${BLUE}we1bboard install-xray${NC} - Install / update Xray-core   │"
   echo -e "│ ${BLUE}we1bboard ssl${NC}          - SSL certificate setup        │"
   echo -e "│ ${BLUE}we1bboard uninstall${NC}    - Uninstall                    │"
   echo -e "└───────────────────────────────────────────────────────┘"
@@ -692,13 +742,15 @@ do_install() {
   step 3 "Choose database"
   choose_database
   write_service
-  step 4 "Panel access (port / path / admin)"
+  step 4 "Install Xray-core"
+  install_xray
+  step 5 "Panel access (port / path / admin)"
   configure_panel
-  step 5 "SSL certificate"
+  step 6 "SSL certificate"
   prompt_and_setup_ssl
-  step 6 "Firewall (UFW)"
+  step 7 "Firewall (UFW)"
   setup_ufw
-  step 7 "Start service"
+  step 8 "Start service"
   start_panel
   print_access
   log "Installation finished."
@@ -732,7 +784,8 @@ menu() {
     echo "10. Update to latest"
     echo "11. Install specific / legacy version"
     echo "12. Quick rollback (previous binary)"
-    echo "13. Uninstall"
+    echo "13. Install / update Xray-core"
+    echo "14. Uninstall"
     echo "0. Exit"
     read -r -p "Select: " c || true
     case "${c}" in
@@ -768,6 +821,11 @@ menu() {
         bash <(curl -fsSL "https://raw.githubusercontent.com/${REPO}/main/scripts/update.sh") rollback
         ;;
       13)
+        need_root
+        install_xray
+        systemctl restart "${APP_NAME}" || true
+        ;;
+      14)
         systemctl disable --now "${APP_NAME}" || true
         rm -f "${SERVICE_PATH}" "${ENV_FILE}" "${MGMT_BIN}" /usr/bin/we1bboard-ctl /usr/local/bin/we1bboard
         rm -rf "${INSTALL_DIR}"

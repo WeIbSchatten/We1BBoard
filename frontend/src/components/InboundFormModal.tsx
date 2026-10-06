@@ -21,6 +21,7 @@ import {
   randomSS2022Password,
 } from '../lib/inboundForm'
 import { randomLowerAndNum, randomShortIds, randomSpiderX } from '../lib/random'
+import { FormRow } from './FormRow'
 
 function ssPasswordForMethod(method: string): string {
   return method.startsWith('2022-') ? randomSS2022Password(method) : randomLowerAndNum(32)
@@ -214,7 +215,7 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <form className="modal inbound-modal" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+      <form className="modal modal--lg" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         <h3>{mode === 'edit' ? tr('edit') : tr('create')} inbound</h3>
 
         <div className="tabs">
@@ -225,353 +226,433 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
           ))}
         </div>
 
-        {tab === 'general' && (
-          <div className="grid2">
-            <div className="field">
-              <label className="label">{tr('remark')}</label>
-              <input className="input" value={form.remark} onChange={(e) => set('remark', e.target.value)} placeholder="My VLESS" />
-            </div>
-            <div className="field">
-              <label className="label">{tr('port')}</label>
-              <input className="input" type="number" min={1} max={65535} value={form.port} onChange={(e) => set('port', Number(e.target.value))} required />
-            </div>
-            <div className="field">
-              <label className="label">{tr('protocol')}</label>
-              <select className="select" value={form.protocol} onChange={(e) => set('protocol', e.target.value)} disabled={mode === 'edit'}>
-                {PROTOCOLS.map((p) => <option key={p} value={p}>{p}</option>)}
-              </select>
-            </div>
-            <div className="field">
-              <label className="label">Listen <span className="hint">(empty = 0.0.0.0)</span></label>
-              <input className="input" value={form.listen} onChange={(e) => set('listen', e.target.value)} placeholder="0.0.0.0" />
-            </div>
-            {form.protocol === 'shadowsocks' && (
-              <>
-                <div className="field">
-                  <label className="label">Method</label>
-                  <select className="select" value={form.ssMethod} onChange={(e) => set('ssMethod', e.target.value)}>
-                    {SS_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
-                  </select>
-                </div>
-                <div className="field">
-                  <label className="label">{tr('password')}</label>
-                  <div className="row-actions">
-                    <input className="input" value={form.ssPassword} onChange={(e) => set('ssPassword', e.target.value)} />
-                    <button type="button" className="btn secondary" onClick={() => set('ssPassword', ssPasswordForMethod(form.ssMethod))}>↻</button>
-                  </div>
-                </div>
-              </>
-            )}
-            {isWg && (
-              <>
-                <div className="field" style={{ gridColumn: '1 / -1' }}>
-                  <label className="label">Secret key</label>
-                  <div className="row-actions">
-                    <input className="input" value={form.wgSecretKey} onChange={(e) => set('wgSecretKey', e.target.value)} />
-                    <button type="button" className="btn secondary" onClick={() => { void genWgKeys() }}>↻</button>
-                  </div>
-                </div>
-                <div className="field">
-                  <label className="label">Address</label>
-                  <input className="input" value={form.wgAddress} onChange={(e) => set('wgAddress', e.target.value)} placeholder="10.0.0.1/24" />
-                </div>
-                <div className="field">
-                  <label className="label">MTU</label>
-                  <input className="input" type="number" min={576} max={65535} value={form.wgMtu} onChange={(e) => set('wgMtu', Number(e.target.value))} />
-                </div>
-                <p className="page-sub" style={{ gridColumn: '1 / -1', margin: 0 }}>Peers are empty — panel clients can be mapped as peers later.</p>
-              </>
-            )}
-            {form.protocol === 'amneziawg' && (
-              <>
-                <div className="row-actions" style={{ gridColumn: '1 / -1' }}>
-                  <button type="button" className="btn secondary" onClick={() => setForm((prev) => ({ ...prev, ...randomAwgObfuscation() }))}>
-                    Regenerate obfuscation
-                  </button>
-                </div>
-                <div className="field"><label className="label">Jc</label><input className="input" type="number" value={form.awgJc} onChange={(e) => set('awgJc', Number(e.target.value))} /></div>
-                <div className="field"><label className="label">Jmin</label><input className="input" type="number" value={form.awgJmin} onChange={(e) => set('awgJmin', Number(e.target.value))} /></div>
-                <div className="field"><label className="label">Jmax</label><input className="input" type="number" value={form.awgJmax} onChange={(e) => set('awgJmax', Number(e.target.value))} /></div>
-                <div className="field"><label className="label">S1</label><input className="input" type="number" value={form.awgS1} onChange={(e) => set('awgS1', Number(e.target.value))} /></div>
-                <div className="field"><label className="label">S2</label><input className="input" type="number" value={form.awgS2} onChange={(e) => set('awgS2', Number(e.target.value))} /></div>
-                <div className="field"><label className="label">H1</label><input className="input" value={form.awgH1} onChange={(e) => set('awgH1', e.target.value)} /></div>
-                <div className="field"><label className="label">H2</label><input className="input" value={form.awgH2} onChange={(e) => set('awgH2', e.target.value)} /></div>
-                <div className="field"><label className="label">H3</label><input className="input" value={form.awgH3} onChange={(e) => set('awgH3', e.target.value)} /></div>
-                <div className="field"><label className="label">H4</label><input className="input" value={form.awgH4} onChange={(e) => set('awgH4', e.target.value)} /></div>
-              </>
-            )}
-            {form.protocol === 'tuic' && (
-              <>
-                <div className="field">
-                  <label className="label">Congestion control</label>
-                  <select className="select" value={form.tuicCongestion} onChange={(e) => set('tuicCongestion', e.target.value)}>
-                    <option value="bbr">bbr</option>
-                    <option value="cubic">cubic</option>
-                    <option value="new_reno">new_reno</option>
-                  </select>
-                </div>
-                <p className="page-sub" style={{ gridColumn: '1 / -1', margin: 0 }}>Users list starts empty — panel clients may not map to TUIC users yet.</p>
-              </>
-            )}
-            {form.protocol === 'hysteria2' && (
-              <>
-                <div className="field">
-                  <label className="label">{tr('password')}</label>
-                  <div className="row-actions">
-                    <input className="input" value={form.hy2Password} onChange={(e) => set('hy2Password', e.target.value)} />
-                    <button type="button" className="btn secondary" onClick={() => set('hy2Password', randomLowerAndNum(16))}>↻</button>
-                  </div>
-                </div>
-                <p className="page-sub" style={{ gridColumn: '1 / -1', margin: 0 }}>Users list starts empty — panel clients may not map to Hysteria2 users yet.</p>
-              </>
-            )}
-            {form.protocol === 'mtproto' && (
-              <div className="field" style={{ gridColumn: '1 / -1' }}>
-                <label className="label">Fake TLS domain</label>
-                <input className="input" value={form.mtprotoFakeTlsDomain} onChange={(e) => set('mtprotoFakeTlsDomain', e.target.value)} placeholder="www.cloudflare.com" />
-              </div>
-            )}
-            {(form.protocol === 'http' || form.protocol === 'socks') && (
-              <p className="page-sub" style={{ gridColumn: '1 / -1', margin: 0 }}>
-                Clients on this inbound become {form.protocol.toUpperCase()} accounts (user/pass).
-              </p>
-            )}
-            <div className="field">
-              <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <input type="checkbox" checked={form.enable} onChange={(e) => set('enable', e.target.checked)} />
-                {tr('enable')}
-              </label>
-            </div>
-          </div>
-        )}
+        <div className="modal-body-scroll">
+          {tab === 'general' && (
+            <div>
+              <FormRow label={tr('remark')}>
+                <input className="input" value={form.remark} onChange={(e) => set('remark', e.target.value)} placeholder="My VLESS" />
+              </FormRow>
+              <FormRow label={tr('port')}>
+                <input
+                  className="input input-number--compact"
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={form.port}
+                  onChange={(e) => set('port', Number(e.target.value))}
+                  required
+                />
+              </FormRow>
+              <FormRow label={tr('protocol')}>
+                <select className="select" value={form.protocol} onChange={(e) => set('protocol', e.target.value)} disabled={mode === 'edit'}>
+                  {PROTOCOLS.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </FormRow>
+              <FormRow label="Listen" hint="Empty = 0.0.0.0">
+                <input className="input" value={form.listen} onChange={(e) => set('listen', e.target.value)} placeholder="0.0.0.0" />
+              </FormRow>
+              <FormRow label={tr('enable')}>
+                <label className="form-switch">
+                  <input type="checkbox" checked={form.enable} onChange={(e) => set('enable', e.target.checked)} />
+                  <span>{form.enable ? 'On' : 'Off'}</span>
+                </label>
+              </FormRow>
 
-        {tab === 'network' && needsStream && (
-          <div>
-            <div className="field">
-              <label className="label">{tr('network')}</label>
-              <select className="select" value={form.network} onChange={(e) => set('network', e.target.value as InboundFormState['network'])}>
-                {NETWORKS.map((n) => <option key={n} value={n}>{n === 'tcp' ? 'tcp (raw)' : n}</option>)}
-              </select>
-            </div>
-            {form.network === 'ws' && (
-              <div className="grid2">
-                <div className="field">
-                  <label className="label">Path</label>
-                  <input className="input" value={form.wsPath} onChange={(e) => set('wsPath', e.target.value)} />
+              {form.protocol === 'shadowsocks' && (
+                <div className="form-section">
+                  <div className="form-section__title">Shadowsocks</div>
+                  <div className="form-section__body">
+                    <FormRow label="Method">
+                      <select className="select" value={form.ssMethod} onChange={(e) => set('ssMethod', e.target.value)}>
+                        {SS_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+                      </select>
+                    </FormRow>
+                    <FormRow label={tr('password')}>
+                      <div className="input-compact">
+                        <input className="input" value={form.ssPassword} onChange={(e) => set('ssPassword', e.target.value)} />
+                        <button type="button" className="btn secondary btn-sm" onClick={() => set('ssPassword', ssPasswordForMethod(form.ssMethod))}>↻</button>
+                      </div>
+                    </FormRow>
+                  </div>
                 </div>
-                <div className="field">
-                  <label className="label">Host</label>
-                  <input className="input" value={form.wsHost} onChange={(e) => set('wsHost', e.target.value)} />
-                </div>
-              </div>
-            )}
-            {form.network === 'grpc' && (
-              <div className="field">
-                <label className="label">Service name</label>
-                <input className="input" value={form.grpcService} onChange={(e) => set('grpcService', e.target.value)} />
-              </div>
-            )}
-            {form.network === 'httpupgrade' && (
-              <div className="field">
-                <label className="label">Path</label>
-                <input className="input" value={form.httpupgradePath} onChange={(e) => set('httpupgradePath', e.target.value)} />
-              </div>
-            )}
-            {form.network === 'xhttp' && (
-              <div className="grid2">
-                <div className="field">
-                  <label className="label">Path</label>
-                  <input className="input" value={form.xhttpPath} onChange={(e) => set('xhttpPath', e.target.value)} />
-                </div>
-                <div className="field">
-                  <label className="label">Mode</label>
-                  <select className="select" value={form.xhttpMode} onChange={(e) => set('xhttpMode', e.target.value)}>
-                    <option value="auto">auto</option>
-                    <option value="packet-up">packet-up</option>
-                    <option value="stream-up">stream-up</option>
-                    <option value="stream-one">stream-one</option>
-                  </select>
-                </div>
-              </div>
-            )}
-            {form.network === 'kcp' && (
-              <div className="field">
-                <label className="label">Seed</label>
-                <div className="row-actions">
-                  <input className="input" value={form.kcpSeed} onChange={(e) => set('kcpSeed', e.target.value)} />
-                  <button type="button" className="btn secondary" onClick={() => set('kcpSeed', randomLowerAndNum(8))}>↻</button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+              )}
 
-        {tab === 'security' && needsStream && (
-          <div>
-            <div className="field">
-              <label className="label">{tr('security')}</label>
-              <select className="select" value={form.security} onChange={(e) => set('security', e.target.value as InboundFormState['security'])}>
-                {SECURITIES.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-            {form.security === 'tls' && (
-              <div className="grid2">
-                <div className="field">
-                  <label className="label">SNI / serverName</label>
-                  <input className="input" value={form.tlsSNI} onChange={(e) => set('tlsSNI', e.target.value)} />
+              {isWg && (
+                <div className="form-section">
+                  <div className="form-section__title">{form.protocol === 'amneziawg' ? 'AmneziaWG' : 'WireGuard'}</div>
+                  <div className="form-section__subtitle">Peers are empty — panel clients can be mapped as peers later.</div>
+                  <div className="form-section__body">
+                    <FormRow label="Secret key">
+                      <div className="input-compact">
+                        <input className="input" value={form.wgSecretKey} onChange={(e) => set('wgSecretKey', e.target.value)} />
+                        <button type="button" className="btn secondary btn-sm" onClick={() => { void genWgKeys() }}>↻</button>
+                      </div>
+                    </FormRow>
+                    <FormRow label="Address">
+                      <input className="input" value={form.wgAddress} onChange={(e) => set('wgAddress', e.target.value)} placeholder="10.0.0.1/24" />
+                    </FormRow>
+                    <FormRow label="MTU">
+                      <input
+                        className="input input-number--compact"
+                        type="number"
+                        min={576}
+                        max={65535}
+                        value={form.wgMtu}
+                        onChange={(e) => set('wgMtu', Number(e.target.value))}
+                      />
+                    </FormRow>
+                  </div>
                 </div>
-                <div className="field">
-                  <label className="label">ALPN</label>
-                  <input className="input" value={form.tlsALPN} onChange={(e) => set('tlsALPN', e.target.value)} placeholder="h2,http/1.1" />
-                </div>
-                <div className="field">
-                  <label className="label">Cert file path</label>
-                  <input className="input" value={form.tlsCertFile} onChange={(e) => set('tlsCertFile', e.target.value)} placeholder="/path/to/fullchain.pem" />
-                </div>
-                <div className="field">
-                  <label className="label">Key file path</label>
-                  <input className="input" value={form.tlsKeyFile} onChange={(e) => set('tlsKeyFile', e.target.value)} placeholder="/path/to/privkey.pem" />
-                </div>
-                <div className="field" style={{ gridColumn: '1 / -1' }}>
-                  <label className="label">Cert PEM content <span className="hint">(optional alternative to file)</span></label>
-                  <textarea className="input" rows={4} value={form.tlsCertContent} onChange={(e) => set('tlsCertContent', e.target.value)} placeholder="-----BEGIN CERTIFICATE-----" />
-                </div>
-                <div className="field" style={{ gridColumn: '1 / -1' }}>
-                  <label className="label">Key PEM content <span className="hint">(optional alternative to file)</span></label>
-                  <textarea className="input" rows={4} value={form.tlsKeyContent} onChange={(e) => set('tlsKeyContent', e.target.value)} placeholder="-----BEGIN PRIVATE KEY-----" />
-                </div>
-                <div className="field">
-                  <label className="label">Fingerprint</label>
-                  <select className="select" value={form.tlsFingerprint} onChange={(e) => set('tlsFingerprint', e.target.value)}>
-                    {FINGERPRINTS.map((fp) => <option key={fp} value={fp}>{fp}</option>)}
-                  </select>
-                </div>
-              </div>
-            )}
-            {form.security === 'reality' && (
-              <>
-                <div className="row-actions" style={{ marginBottom: 10 }}>
-                  <button type="button" className="btn secondary" onClick={() => refreshKeys()}>{tr('genKeys')}</button>
-                  <button type="button" className="btn secondary" onClick={() => setForm((prev) => applyCloudflareRealityDefaults(prev))}>Fill Cloudflare defaults</button>
-                  <button type="button" className="btn secondary" onClick={() => set('realityShortIds', randomShortIds().join(','))}>ShortIds</button>
-                  <button type="button" className="btn secondary" onClick={() => set('realitySpiderX', randomSpiderX())}>SpiderX</button>
-                </div>
-                <div className="grid2">
-                  <div className="field">
-                    <label className="label">Dest / target *</label>
-                    <div className="row-actions">
-                      <input className="input" value={form.realityDest} onChange={(e) => set('realityDest', e.target.value)} placeholder="www.cloudflare.com:443" required={form.security === 'reality'} />
-                      <button type="button" className="btn secondary" disabled={busy} onClick={() => { void scanRealityTarget() }}>{tr('scan')}</button>
+              )}
+
+              {form.protocol === 'amneziawg' && (
+                <div className="form-section">
+                  <div className="form-section__title">Obfuscation</div>
+                  <div className="form-section__body">
+                    <div className="form-actions" style={{ marginTop: 0, paddingTop: 0, borderTop: 0, marginBottom: '0.75rem' }}>
+                      <button type="button" className="btn secondary btn-sm" onClick={() => setForm((prev) => ({ ...prev, ...randomAwgObfuscation() }))}>
+                        Regenerate obfuscation
+                      </button>
                     </div>
-                  </div>
-                  <div className="field">
-                    <label className="label">ServerNames (SNI) *</label>
-                    <input className="input" value={form.realitySNI} onChange={(e) => set('realitySNI', e.target.value)} placeholder="www.cloudflare.com" />
-                  </div>
-                  <div className="field">
-                    <label className="label">Private key</label>
-                    <input className="input" value={form.realityPrivateKey} onChange={(e) => set('realityPrivateKey', e.target.value)} />
-                  </div>
-                  <div className="field">
-                    <label className="label">Public key</label>
-                    <input className="input" value={form.realityPublicKey} onChange={(e) => set('realityPublicKey', e.target.value)} readOnly />
-                  </div>
-                  <div className="field" style={{ gridColumn: '1 / -1' }}>
-                    <label className="label">Short IDs (csv)</label>
-                    <input className="input" value={form.realityShortIds} onChange={(e) => set('realityShortIds', e.target.value)} />
-                  </div>
-                  <div className="field">
-                    <label className="label">Fingerprint</label>
-                    <select className="select" value={form.realityFingerprint} onChange={(e) => set('realityFingerprint', e.target.value)}>
-                      {FINGERPRINTS.map((fp) => <option key={fp} value={fp}>{fp}</option>)}
-                    </select>
-                  </div>
-                  <div className="field">
-                    <label className="label">SpiderX</label>
-                    <input className="input" value={form.realitySpiderX} onChange={(e) => set('realitySpiderX', e.target.value)} />
+                    <FormRow label="Jc">
+                      <input className="input input-number--compact" type="number" value={form.awgJc} onChange={(e) => set('awgJc', Number(e.target.value))} />
+                    </FormRow>
+                    <FormRow label="Jmin">
+                      <input className="input input-number--compact" type="number" value={form.awgJmin} onChange={(e) => set('awgJmin', Number(e.target.value))} />
+                    </FormRow>
+                    <FormRow label="Jmax">
+                      <input className="input input-number--compact" type="number" value={form.awgJmax} onChange={(e) => set('awgJmax', Number(e.target.value))} />
+                    </FormRow>
+                    <FormRow label="S1">
+                      <input className="input input-number--compact" type="number" value={form.awgS1} onChange={(e) => set('awgS1', Number(e.target.value))} />
+                    </FormRow>
+                    <FormRow label="S2">
+                      <input className="input input-number--compact" type="number" value={form.awgS2} onChange={(e) => set('awgS2', Number(e.target.value))} />
+                    </FormRow>
+                    <FormRow label="H1">
+                      <input className="input" value={form.awgH1} onChange={(e) => set('awgH1', e.target.value)} />
+                    </FormRow>
+                    <FormRow label="H2">
+                      <input className="input" value={form.awgH2} onChange={(e) => set('awgH2', e.target.value)} />
+                    </FormRow>
+                    <FormRow label="H3">
+                      <input className="input" value={form.awgH3} onChange={(e) => set('awgH3', e.target.value)} />
+                    </FormRow>
+                    <FormRow label="H4">
+                      <input className="input" value={form.awgH4} onChange={(e) => set('awgH4', e.target.value)} />
+                    </FormRow>
                   </div>
                 </div>
-              </>
-            )}
-          </div>
-        )}
+              )}
 
-        {tab === 'sniffing' && needsStream && (
-          <div className="grid2">
-            <div className="field">
-              <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <input type="checkbox" checked={form.sniffEnabled} onChange={(e) => set('sniffEnabled', e.target.checked)} />
-                {tr('enable')} sniffing
-              </label>
-            </div>
-            <div className="field">
-              <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <input type="checkbox" checked={form.sniffRouteOnly} onChange={(e) => set('sniffRouteOnly', e.target.checked)} />
-                routeOnly
-              </label>
-            </div>
-            <div className="field">
-              <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <input type="checkbox" checked={form.sniffMetadataOnly} onChange={(e) => set('sniffMetadataOnly', e.target.checked)} />
-                metadataOnly
-              </label>
-            </div>
-            <div className="field" style={{ gridColumn: '1 / -1' }}>
-              <label className="label">destOverride (csv)</label>
-              <input className="input" value={form.sniffDestOverride} onChange={(e) => set('sniffDestOverride', e.target.value)} />
-            </div>
-            <div className="field">
-              <label className="label">domainsExcluded (csv)</label>
-              <input className="input" value={form.sniffDomainsExcluded} onChange={(e) => set('sniffDomainsExcluded', e.target.value)} />
-            </div>
-            <div className="field">
-              <label className="label">ipsExcluded (csv)</label>
-              <input className="input" value={form.sniffIpsExcluded} onChange={(e) => set('sniffIpsExcluded', e.target.value)} />
-            </div>
-          </div>
-        )}
+              {form.protocol === 'tuic' && (
+                <div className="form-section">
+                  <div className="form-section__title">TUIC</div>
+                  <div className="form-section__subtitle">Users list starts empty — panel clients may not map to TUIC users yet.</div>
+                  <div className="form-section__body">
+                    <FormRow label="Congestion">
+                      <select className="select" value={form.tuicCongestion} onChange={(e) => set('tuicCongestion', e.target.value)}>
+                        <option value="bbr">bbr</option>
+                        <option value="cubic">cubic</option>
+                        <option value="new_reno">new_reno</option>
+                      </select>
+                    </FormRow>
+                  </div>
+                </div>
+              )}
 
-        {tab === 'advanced' && showAdvanced && (
-          <div className="grid2">
-            {showFallbacks && (
-              <div className="field" style={{ gridColumn: '1 / -1' }}>
-                <label className="label">Fallbacks (JSON array)</label>
-                <textarea
-                  className="input"
-                  rows={8}
-                  value={form.fallbacksJSON}
-                  onChange={(e) => set('fallbacksJSON', e.target.value)}
-                  placeholder='[{"dest":"80","xver":0}]'
-                  style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: '0.85rem' }}
-                />
-              </div>
-            )}
-            {needsStream && (
-              <div className="field" style={{ gridColumn: '1 / -1' }}>
-                <label className="label">Sockopt (JSON object, optional)</label>
-                <textarea
-                  className="input"
-                  rows={6}
-                  value={form.sockoptJSON}
-                  onChange={(e) => set('sockoptJSON', e.target.value)}
-                  placeholder='{"tcpFastOpen":true}'
-                  style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: '0.85rem' }}
-                />
-              </div>
-            )}
-          </div>
-        )}
+              {form.protocol === 'hysteria2' && (
+                <div className="form-section">
+                  <div className="form-section__title">Hysteria2</div>
+                  <div className="form-section__subtitle">Users list starts empty — panel clients may not map to Hysteria2 users yet.</div>
+                  <div className="form-section__body">
+                    <FormRow label={tr('password')}>
+                      <div className="input-compact">
+                        <input className="input" value={form.hy2Password} onChange={(e) => set('hy2Password', e.target.value)} />
+                        <button type="button" className="btn secondary btn-sm" onClick={() => set('hy2Password', randomLowerAndNum(16))}>↻</button>
+                      </div>
+                    </FormRow>
+                  </div>
+                </div>
+              )}
+
+              {form.protocol === 'mtproto' && (
+                <div className="form-section">
+                  <div className="form-section__title">MTProto</div>
+                  <div className="form-section__body">
+                    <FormRow label="Fake TLS domain">
+                      <input className="input" value={form.mtprotoFakeTlsDomain} onChange={(e) => set('mtprotoFakeTlsDomain', e.target.value)} placeholder="www.cloudflare.com" />
+                    </FormRow>
+                  </div>
+                </div>
+              )}
+
+              {(form.protocol === 'http' || form.protocol === 'socks') && (
+                <div className="form-section">
+                  <div className="form-section__title">{form.protocol.toUpperCase()}</div>
+                  <div className="form-section__subtitle">
+                    Clients on this inbound become {form.protocol.toUpperCase()} accounts (user/pass).
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {tab === 'network' && needsStream && (
+            <div>
+              <FormRow label={tr('network')}>
+                <select className="select" value={form.network} onChange={(e) => set('network', e.target.value as InboundFormState['network'])}>
+                  {NETWORKS.map((n) => <option key={n} value={n}>{n === 'tcp' ? 'tcp (raw)' : n}</option>)}
+                </select>
+              </FormRow>
+
+              {form.network === 'ws' && (
+                <div className="form-section">
+                  <div className="form-section__title">WebSocket</div>
+                  <div className="form-section__body">
+                    <FormRow label="Path">
+                      <input className="input" value={form.wsPath} onChange={(e) => set('wsPath', e.target.value)} />
+                    </FormRow>
+                    <FormRow label="Host">
+                      <input className="input" value={form.wsHost} onChange={(e) => set('wsHost', e.target.value)} />
+                    </FormRow>
+                  </div>
+                </div>
+              )}
+
+              {form.network === 'grpc' && (
+                <div className="form-section">
+                  <div className="form-section__title">gRPC</div>
+                  <div className="form-section__body">
+                    <FormRow label="Service name">
+                      <input className="input" value={form.grpcService} onChange={(e) => set('grpcService', e.target.value)} />
+                    </FormRow>
+                  </div>
+                </div>
+              )}
+
+              {form.network === 'httpupgrade' && (
+                <div className="form-section">
+                  <div className="form-section__title">HTTPUpgrade</div>
+                  <div className="form-section__body">
+                    <FormRow label="Path">
+                      <input className="input" value={form.httpupgradePath} onChange={(e) => set('httpupgradePath', e.target.value)} />
+                    </FormRow>
+                  </div>
+                </div>
+              )}
+
+              {form.network === 'xhttp' && (
+                <div className="form-section">
+                  <div className="form-section__title">XHTTP</div>
+                  <div className="form-section__body">
+                    <FormRow label="Path">
+                      <input className="input" value={form.xhttpPath} onChange={(e) => set('xhttpPath', e.target.value)} />
+                    </FormRow>
+                    <FormRow label="Mode">
+                      <select className="select" value={form.xhttpMode} onChange={(e) => set('xhttpMode', e.target.value)}>
+                        <option value="auto">auto</option>
+                        <option value="packet-up">packet-up</option>
+                        <option value="stream-up">stream-up</option>
+                        <option value="stream-one">stream-one</option>
+                      </select>
+                    </FormRow>
+                  </div>
+                </div>
+              )}
+
+              {form.network === 'kcp' && (
+                <div className="form-section">
+                  <div className="form-section__title">mKCP</div>
+                  <div className="form-section__body">
+                    <FormRow label="Seed">
+                      <div className="input-compact">
+                        <input className="input" value={form.kcpSeed} onChange={(e) => set('kcpSeed', e.target.value)} />
+                        <button type="button" className="btn secondary btn-sm" onClick={() => set('kcpSeed', randomLowerAndNum(8))}>↻</button>
+                      </div>
+                    </FormRow>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {tab === 'security' && needsStream && (
+            <div>
+              <FormRow label={tr('security')}>
+                <div className="seg">
+                  {SECURITIES.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      className={form.security === s ? 'active' : ''}
+                      onClick={() => set('security', s)}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </FormRow>
+
+              {form.security === 'tls' && (
+                <div className="form-section">
+                  <div className="form-section__title">TLS</div>
+                  <div className="form-section__body">
+                    <FormRow label="SNI / serverName">
+                      <input className="input" value={form.tlsSNI} onChange={(e) => set('tlsSNI', e.target.value)} />
+                    </FormRow>
+                    <FormRow label="ALPN">
+                      <input className="input" value={form.tlsALPN} onChange={(e) => set('tlsALPN', e.target.value)} placeholder="h2,http/1.1" />
+                    </FormRow>
+                    <FormRow label="Cert file">
+                      <input className="input" value={form.tlsCertFile} onChange={(e) => set('tlsCertFile', e.target.value)} placeholder="/path/to/fullchain.pem" />
+                    </FormRow>
+                    <FormRow label="Key file">
+                      <input className="input" value={form.tlsKeyFile} onChange={(e) => set('tlsKeyFile', e.target.value)} placeholder="/path/to/privkey.pem" />
+                    </FormRow>
+                    <FormRow label="Cert PEM" hint="Optional alternative to file path">
+                      <textarea className="textarea" rows={4} value={form.tlsCertContent} onChange={(e) => set('tlsCertContent', e.target.value)} placeholder="-----BEGIN CERTIFICATE-----" />
+                    </FormRow>
+                    <FormRow label="Key PEM" hint="Optional alternative to file path">
+                      <textarea className="textarea" rows={4} value={form.tlsKeyContent} onChange={(e) => set('tlsKeyContent', e.target.value)} placeholder="-----BEGIN PRIVATE KEY-----" />
+                    </FormRow>
+                    <FormRow label="Fingerprint">
+                      <select className="select" value={form.tlsFingerprint} onChange={(e) => set('tlsFingerprint', e.target.value)}>
+                        {FINGERPRINTS.map((fp) => <option key={fp} value={fp}>{fp}</option>)}
+                      </select>
+                    </FormRow>
+                  </div>
+                </div>
+              )}
+
+              {form.security === 'reality' && (
+                <div className="form-section">
+                  <div className="form-section__title">REALITY</div>
+                  <div className="form-section__body">
+                    <div className="row-actions" style={{ marginBottom: '0.85rem' }}>
+                      <button type="button" className="btn secondary btn-sm" onClick={() => refreshKeys()}>{tr('genKeys')}</button>
+                      <button type="button" className="btn secondary btn-sm" onClick={() => setForm((prev) => applyCloudflareRealityDefaults(prev))}>Cloudflare defaults</button>
+                      <button type="button" className="btn secondary btn-sm" onClick={() => set('realityShortIds', randomShortIds().join(','))}>ShortIds</button>
+                      <button type="button" className="btn secondary btn-sm" onClick={() => set('realitySpiderX', randomSpiderX())}>SpiderX</button>
+                    </div>
+                    <FormRow label="Dest / target *">
+                      <div className="input-compact">
+                        <input className="input" value={form.realityDest} onChange={(e) => set('realityDest', e.target.value)} placeholder="www.cloudflare.com:443" required={form.security === 'reality'} />
+                        <button type="button" className="btn secondary btn-sm" disabled={busy} onClick={() => { void scanRealityTarget() }}>{tr('scan')}</button>
+                      </div>
+                    </FormRow>
+                    <FormRow label="ServerNames *">
+                      <input className="input" value={form.realitySNI} onChange={(e) => set('realitySNI', e.target.value)} placeholder="www.cloudflare.com" />
+                    </FormRow>
+                    <FormRow label="Private key">
+                      <div className="input-compact">
+                        <input className="input" value={form.realityPrivateKey} onChange={(e) => set('realityPrivateKey', e.target.value)} />
+                        <button type="button" className="btn secondary btn-sm" onClick={() => { void refreshKeys() }}>↻</button>
+                      </div>
+                    </FormRow>
+                    <FormRow label="Public key">
+                      <input className="input" value={form.realityPublicKey} onChange={(e) => set('realityPublicKey', e.target.value)} readOnly />
+                    </FormRow>
+                    <FormRow label="Short IDs" hint="Comma-separated">
+                      <input className="input" value={form.realityShortIds} onChange={(e) => set('realityShortIds', e.target.value)} />
+                    </FormRow>
+                    <FormRow label="Fingerprint">
+                      <select className="select" value={form.realityFingerprint} onChange={(e) => set('realityFingerprint', e.target.value)}>
+                        {FINGERPRINTS.map((fp) => <option key={fp} value={fp}>{fp}</option>)}
+                      </select>
+                    </FormRow>
+                    <FormRow label="SpiderX">
+                      <div className="input-compact">
+                        <input className="input" value={form.realitySpiderX} onChange={(e) => set('realitySpiderX', e.target.value)} />
+                        <button type="button" className="btn secondary btn-sm" onClick={() => set('realitySpiderX', randomSpiderX())}>↻</button>
+                      </div>
+                    </FormRow>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {tab === 'sniffing' && needsStream && (
+            <div>
+              <FormRow label="Sniffing">
+                <label className="form-switch">
+                  <input type="checkbox" checked={form.sniffEnabled} onChange={(e) => set('sniffEnabled', e.target.checked)} />
+                  <span>{form.sniffEnabled ? 'On' : 'Off'}</span>
+                </label>
+              </FormRow>
+              <FormRow label="routeOnly">
+                <label className="form-switch">
+                  <input type="checkbox" checked={form.sniffRouteOnly} onChange={(e) => set('sniffRouteOnly', e.target.checked)} />
+                  <span>{form.sniffRouteOnly ? 'On' : 'Off'}</span>
+                </label>
+              </FormRow>
+              <FormRow label="metadataOnly">
+                <label className="form-switch">
+                  <input type="checkbox" checked={form.sniffMetadataOnly} onChange={(e) => set('sniffMetadataOnly', e.target.checked)} />
+                  <span>{form.sniffMetadataOnly ? 'On' : 'Off'}</span>
+                </label>
+              </FormRow>
+              <FormRow label="destOverride" hint="Comma-separated">
+                <input className="input" value={form.sniffDestOverride} onChange={(e) => set('sniffDestOverride', e.target.value)} />
+              </FormRow>
+              <FormRow label="domainsExcluded" hint="Comma-separated">
+                <input className="input" value={form.sniffDomainsExcluded} onChange={(e) => set('sniffDomainsExcluded', e.target.value)} />
+              </FormRow>
+              <FormRow label="ipsExcluded" hint="Comma-separated">
+                <input className="input" value={form.sniffIpsExcluded} onChange={(e) => set('sniffIpsExcluded', e.target.value)} />
+              </FormRow>
+            </div>
+          )}
+
+          {tab === 'advanced' && showAdvanced && (
+            <div>
+              {showFallbacks && (
+                <div className="form-section">
+                  <div className="form-section__title">Fallbacks</div>
+                  <div className="form-section__subtitle">JSON array</div>
+                  <div className="form-section__body">
+                    <FormRow stack>
+                      <textarea
+                        className="textarea"
+                        rows={8}
+                        value={form.fallbacksJSON}
+                        onChange={(e) => set('fallbacksJSON', e.target.value)}
+                        placeholder='[{"dest":"80","xver":0}]'
+                      />
+                    </FormRow>
+                  </div>
+                </div>
+              )}
+              {needsStream && (
+                <div className="form-section">
+                  <div className="form-section__title">Sockopt</div>
+                  <div className="form-section__subtitle">JSON object, optional</div>
+                  <div className="form-section__body">
+                    <FormRow stack>
+                      <textarea
+                        className="textarea"
+                        rows={6}
+                        value={form.sockoptJSON}
+                        onChange={(e) => set('sockoptJSON', e.target.value)}
+                        placeholder='{"tcpFastOpen":true}'
+                      />
+                    </FormRow>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         {error && <p className="error">{error}</p>}
-        <div className="row-actions" style={{ marginTop: 12 }}>
-          <button className="btn" type="submit" disabled={busy}>{busy ? '…' : tr('save')}</button>
-          <button className="btn secondary" type="button" onClick={onClose}>{tr('cancel')}</button>
+        <div className="form-actions">
+          <div className="form-actions__end">
+            <button className="btn secondary" type="button" onClick={onClose}>{tr('cancel')}</button>
+            <button className="btn" type="submit" disabled={busy}>{busy ? '…' : tr('save')}</button>
+          </div>
         </div>
       </form>
-      <style>{`
-        .inbound-modal { width: min(820px, 100%); }
-        .hint { color: var(--text-muted); font-weight: 400; font-size: 0.8em; }
-      `}</style>
     </div>
   )
 }

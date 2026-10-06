@@ -102,7 +102,8 @@ menu() {
     echo "10. Panel CLI menu"
     echo "11. Update this control script"
     echo "12. Reinstall"
-    echo "13. Uninstall"
+    echo "13. Install / update Xray-core"
+    echo "14. Uninstall"
     read -r -p "Select: " c || true
     case "${c}" in
       0) exit 0 ;;
@@ -118,10 +119,22 @@ menu() {
       10) load_env; "${BIN}" menu ;;
       11) update_ctl_script; exit 0 ;;
       12) reinstall ;;
-      13) uninstall ;;
+      13) need_root; install_xray_cmd ;;
+      14) uninstall ;;
       *) err "invalid option" ;;
     esac
   done
+}
+
+install_xray_cmd() {
+  need_root
+  load_env
+  if [[ ! -x "${BIN}" ]]; then
+    err "panel binary missing: ${BIN}"
+    exit 1
+  fi
+  "${BIN}" install-xray "$@"
+  systemctl restart "${APP_NAME}" 2>/dev/null || true
 }
 
 case "${1:-}" in
@@ -136,9 +149,10 @@ case "${1:-}" in
   update-ctl) update_ctl_script ;;
   uninstall) uninstall ;;
   install) reinstall ;;
+  install-xray) shift || true; install_xray_cmd "$@" ;;
   menu|"") menu ;;
   *)
-    echo "Usage: we1bboard {menu|start|stop|restart|status|update|legacy|rollback|ssl|install|update-ctl|uninstall}"
+    echo "Usage: we1bboard {menu|start|stop|restart|status|update|legacy|rollback|ssl|install|install-xray|update-ctl|uninstall}"
     exit 1
     ;;
 esac

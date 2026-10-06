@@ -93,36 +93,46 @@ export function GroupsPage() {
         <button className="btn" onClick={() => { void createGroup() }}>{tr('create')}</button>
       </div>
 
-      <div className="card">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>{tr('group')}</th>
-              <th>{tr('clients')}</th>
-              <th>Up</th>
-              <th>Down</th>
-              <th>{tr('actions')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {groups.length === 0 && <tr><td colSpan={5}>{tr('empty')}</td></tr>}
-            {groups.map((g) => (
-              <tr key={g.name}>
-                <td>{g.name}</td>
-                <td>{g.count}</td>
-                <td>{(g.up / (1024 * 1024 * 1024)).toFixed(2)} GB</td>
-                <td>{(g.down / (1024 * 1024 * 1024)).toFixed(2)} GB</td>
-                <td className="row-actions">
-                  <button className="btn btn-sm secondary" onClick={() => openAssign(g.name)}>{tr('assignClients')}</button>
-                  <button className="btn btn-sm secondary" onClick={() => { void renameGroup(g.name) }}>{tr('rename')}</button>
-                  <button className="btn btn-sm secondary" onClick={() => setConfirm({ kind: 'reset', name: g.name })}>{tr('resetTraffic')}</button>
-                  <button className="btn btn-sm danger" onClick={() => setConfirm({ kind: 'delete', name: g.name })}>{tr('delete')}</button>
-                </td>
+      {groups.length === 0 ? (
+        <div className="card">
+          <div className="empty-state">
+            <div>{tr('empty')}</div>
+            <button type="button" className="btn" onClick={() => { void createGroup() }}>
+              {tr('create')}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="card">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>{tr('group')}</th>
+                <th>{tr('clients')}</th>
+                <th>Up</th>
+                <th>Down</th>
+                <th>{tr('actions')}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {groups.map((g) => (
+                <tr key={g.name}>
+                  <td>{g.name}</td>
+                  <td>{g.count}</td>
+                  <td>{(g.up / (1024 * 1024 * 1024)).toFixed(2)} GB</td>
+                  <td>{(g.down / (1024 * 1024 * 1024)).toFixed(2)} GB</td>
+                  <td className="row-actions">
+                    <button className="btn btn-sm secondary" onClick={() => openAssign(g.name)}>{tr('assignClients')}</button>
+                    <button className="btn btn-sm secondary" onClick={() => { void renameGroup(g.name) }}>{tr('rename')}</button>
+                    <button className="btn btn-sm secondary" onClick={() => setConfirm({ kind: 'reset', name: g.name })}>{tr('resetTraffic')}</button>
+                    <button className="btn btn-sm danger" onClick={() => setConfirm({ kind: 'delete', name: g.name })}>{tr('delete')}</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {assignOpen && (
         <div className="modal-backdrop" onClick={() => setAssignOpen(false)}>

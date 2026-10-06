@@ -46,10 +46,13 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: '0'
         run: |
+          # Tags are "v1.0.12"; strip the leading "v" so config.Version is "1.0.12".
+          # DisplayVersion()/UI add a single "v" — avoids "vv1.0.12".
           VERSION="${GITHUB_REF_NAME}"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             VERSION="${{ inputs.tag }}"
           fi
+          VERSION="${VERSION#v}"
           go build -trimpath -ldflags="-s -w -X github.com/we1bboard/we1bboard/internal/config.Version=${VERSION}" -o we1bboard ./cmd/we1bboard
           tar -czf "we1bboard-linux-${{ matrix.goarch }}.tar.gz" we1bboard
           ls -lah we1bboard-linux-${{ matrix.goarch }}.tar.gz
