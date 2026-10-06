@@ -462,7 +462,7 @@ func (a *API) ClearClientHWIDs(c *gin.Context) {
 
 func (a *API) ClientLink(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
-	host := c.Query("host")
+	host := resolveShareHost(c)
 	if host != "" && !security.ValidShareHost(host) {
 		fail(c, 400, fmt.Errorf("invalid host"))
 		return
@@ -479,7 +479,7 @@ func (a *API) ClientLink(c *gin.Context) {
 // GET /clients/:id/links
 func (a *API) ClientLinks(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
-	host := c.Query("host")
+	host := resolveShareHost(c)
 	if host != "" && !security.ValidShareHost(host) {
 		fail(c, 400, fmt.Errorf("invalid host"))
 		return
@@ -497,7 +497,7 @@ func (a *API) ClientLinks(c *gin.Context) {
 
 func (a *API) ClientQR(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
-	host := c.Query("host")
+	host := resolveShareHost(c)
 	if host != "" && !security.ValidShareHost(host) {
 		fail(c, 400, fmt.Errorf("invalid host"))
 		return
@@ -531,12 +531,23 @@ func (a *API) ClientSub(c *gin.Context) {
 		fail(c, 400, fmt.Errorf("client has no subscription id"))
 		return
 	}
+	hint := resolveShareHost(c)
 	ok(c, gin.H{
 		"subId":   cl.SubID,
 		"enable":  sub.Enabled(),
-		"baseUrl": sub.PublicBaseURL(""),
-		"urls":    sub.ClientSubURLs(cl.SubID),
+		"baseUrl": sub.PublicBaseURL(hint),
+		"urls":    sub.ClientSubURLs(cl.SubID, hint),
+		"subPort": sub.EffectiveSubPort(),
+		"subHost": sub.DefaultShareHost(hint),
 	})
+}
+
+// resolveShareHost prefers ?host=, then subHost setting, then the panel request Host.
+func resolveShareHost(c *gin.Context) string {
+	if h := strings.TrimSpace(c.Query("host")); h != "" {
+		return h
+	}
+	return sub.DefaultShareHost(c.Request.Host)
 }
 
 func (a *API) SubscriptionInfo(c *gin.Context) {
@@ -548,12 +559,15 @@ func (a *API) SubscriptionInfo(c *gin.Context) {
 		formats = append(formats, "json")
 	}
 	ok(c, gin.H{
-		"enable":  sub.Enabled(),
-		"subPort": database.GetSetting("subPort"),
-		"subPath": sub.NormalizePath(database.GetSetting("subPath")),
-		"subHost": database.GetSetting("subHost"),
-		"baseUrl": sub.PublicBaseURL(""),
-		"formats": formats,
+		"enable":         sub.Enabled(),
+		"subPort":        sub.EffectiveSubPort(),
+		"subPortSetting": database.GetSetting("subPort"),
+		"subPath":        sub.NormalizePath(database.GetSetting("subPath")),
+		"subHost":        sub.DefaultShareHost(c.Request.Host),
+		"subHostSetting": database.GetSetting("subHost"),
+		"dedicated":      sub.DedicatedSubPort(),
+		"baseUrl":        sub.PublicBaseURL(c.Request.Host),
+		"formats":        formats,
 	})
 }
 

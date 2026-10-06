@@ -53,11 +53,20 @@ func (a *tuicAdapter) ToXrayInbound(in *model.Inbound, clients []model.Client) (
 
 func (a *tuicAdapter) ShareLink(in *model.Inbound, c model.Client, host string) (string, error) {
 	q := url.Values{}
-	q.Set("congestion_control", "bbr")
+	settings := ParseSettings(in.Settings)
+	if cc := asString(settings["congestion_control"]); cc != "" {
+		q.Set("congestion_control", cc)
+	} else {
+		q.Set("congestion_control", "bbr")
+	}
 	q.Set("udp_relay_mode", "native")
 	q.Set("alpn", "h3")
-	return fmt.Sprintf("tuic://%s:%s@%s:%d?%s#%s",
-		c.UUID, c.Password, host, in.Port, q.Encode(), url.QueryEscape(c.Email)), nil
+	pw := c.Password
+	if pw == "" {
+		pw = c.UUID
+	}
+	return fmt.Sprintf("tuic://%s:%s@%s?%s#%s",
+		c.UUID, pw, joinShareAddr(host, in.Port), q.Encode(), fragmentEscape(remarkFor(in, c))), nil
 }
 
 type hy2Adapter struct{}
@@ -82,7 +91,11 @@ func (a *hy2Adapter) ShareLink(in *model.Inbound, c model.Client, host string) (
 		pw = c.UUID
 	}
 	q := url.Values{}
+	settings := ParseSettings(in.Settings)
+	if sni := asString(settings["sni"]); sni != "" {
+		q.Set("sni", sni)
+	}
 	q.Set("insecure", "0")
-	return fmt.Sprintf("hysteria2://%s@%s:%d?%s#%s",
-		pw, host, in.Port, q.Encode(), url.QueryEscape(c.Email)), nil
+	return fmt.Sprintf("hysteria2://%s@%s?%s#%s",
+		url.PathEscape(pw), joinShareAddr(host, in.Port), q.Encode(), fragmentEscape(remarkFor(in, c))), nil
 }

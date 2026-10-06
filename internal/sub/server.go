@@ -3,6 +3,7 @@ package sub
 import (
 	"encoding/base64"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -91,16 +92,110 @@ func (s *Server) host() string {
 	if s.Host != "" {
 		return s.Host
 	}
-	h := database.GetSetting("subHost")
-	if h != "" {
+	return DefaultShareHost("")
+}
+
+// DedicatedSubPort reports whether subscription listens on its own TLS port.
+func DedicatedSubPort() bool {
+	subPort := database.GetSetting("subPort")
+	if subPort == "" {
+		subPort = "2096"
+	}
+	panelPort := database.GetSetting("panelPort")
+	if panelPort == "" {
+		panelPort = "2053"
+	}
+	certFile := database.GetSetting("certFile")
+	keyFile := database.GetSetting("keyFile")
+	return subPort != panelPort && certFile != "" && keyFile != ""
+}
+
+// EffectiveSubPort is the port clients must use for subscription URLs.
+func EffectiveSubPort() string {
+	panelPort := database.GetSetting("panelPort")
+	if panelPort == "" {
+		panelPort = "2053"
+	}
+	if DedicatedSubPort() {
+		subPort := database.GetSetting("subPort")
+		if subPort == "" {
+			return "2096"
+		}
+		return subPort
+	}
+	return panelPort
+}
+
+// DefaultShareHost picks subHost, then optional hint (request host), never empty.
+func DefaultShareHost(hint string) string {
+	h := strings.TrimSpace(database.GetSetting("subHost"))
+	if h != "" && security.ValidShareHost(h) {
 		return h
 	}
+	hint = strings.TrimSpace(hint)
+	if hint != "" {
+		hint = stripHostPort(hint)
+		if security.ValidShareHost(hint) {
+			return hint
+		}
+	}
 	return "127.0.0.1"
+}
+
+func stripHostPort(hostport string) string {
+	hostport = strings.TrimSpace(hostport)
+	if hostport == "" {
+		return ""
+	}
+	// bracketed IPv6: [2001:db8::1]:443
+	if strings.HasPrefix(hostport, "[") {
+		if i := strings.Index(hostport, "]"); i > 0 {
+			return hostport[1:i]
+		}
+	}
+	// hostname:port or ipv4:port — only strip if single colon and numeric port
+	if host, port, err := splitHostPortSafe(hostport); err == nil && port != "" {
+		return host
+	}
+	return hostport
+}
+
+func splitHostPortSafe(hostport string) (host, port string, err error) {
+	return net.SplitHostPort(hostport)
+}
+
+// PublicBaseURL builds the subscription base URL (without subId).
+// hintHost is used when subHost setting is empty (typically the panel request Host).
+func PublicBaseURL(hintHost string) string {
+	host := DefaultShareHost(hintHost)
+	port := EffectiveSubPort()
+	path := NormalizePath(database.GetSetting("subPath"))
+	scheme := "http"
+	if database.GetSetting("certFile") != "" && database.GetSetting("keyFile") != "" {
+		scheme = "https"
+	}
+	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
+		return fmt.Sprintf("%s://%s%s", scheme, host, path)
+	}
+	return fmt.Sprintf("%s://%s:%s%s", scheme, host, port, path)
+}
+
+// ClientSubURLs returns absolute subscription links for a subId.
+func ClientSubURLs(subID string, hintHost string) map[string]string {
+	base := strings.TrimSuffix(PublicBaseURL(hintHost), "/") + "/" + subID
+	return map[string]string{
+		"auto":    base,
+		"base64":  base + "?format=base64",
+		"clash":   base + "/clash",
+		"singbox": base + "/singbox",
+		"json":    base + "/json",
+	}
 }
 
 type subEntry struct {
 	Client  model.Client
 	Inbound model.Inbound
+	Address string
 	Link    string
 	Name    string
 }
@@ -148,8 +243,8 @@ func (s *Server) resolve(subID string) ([]subEntry, error) {
 			if !ok {
 				continue
 			}
-			links, err := protocol.ShareLinksForHosts(&in, cl, host, hosts)
-			if err != nil || len(links) == 0 {
+			results, err := protocol.ShareResultsForHosts(&in, cl, host, hosts)
+			if err != nil || len(results) == 0 {
 				continue
 			}
 			baseName := cl.Email
@@ -162,12 +257,18 @@ func (s *Server) resolve(subID string) ([]subEntry, error) {
 					baseName = fmt.Sprintf("%s [%s:%d]", cl.Email, in.Protocol, in.Port)
 				}
 			}
-			for i, link := range links {
+			for i, r := range results {
 				name := baseName
-				if len(links) > 1 {
+				if len(results) > 1 {
 					name = fmt.Sprintf("%s #%d", baseName, i+1)
 				}
-				out = append(out, subEntry{Client: cl, Inbound: in, Link: link, Name: name})
+				out = append(out, subEntry{
+					Client:  cl,
+					Inbound: r.Inbound,
+					Address: r.Address,
+					Link:    r.Link,
+					Name:    name,
+				})
 			}
 		}
 		for _, extra := range model.ExtraLinkLines(cl.ExtraLinks) {
@@ -178,6 +279,7 @@ func (s *Server) resolve(subID string) ([]subEntry, error) {
 			out = append(out, subEntry{
 				Client:  cl,
 				Inbound: model.Inbound{Protocol: "extra", Remark: "extra"},
+				Address: host,
 				Link:    extra,
 				Name:    "extra",
 			})
@@ -430,7 +532,11 @@ func (s *Server) respondJSON(c *gin.Context, entries []subEntry) {
 	out := make([]map[string]any, 0, len(entries))
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
-		ob := jsonOutbound(&e.Inbound, e.Client, s.host(), e.Name, e.Link)
+		addr := e.Address
+		if addr == "" {
+			addr = s.host()
+		}
+		ob := jsonOutbound(&e.Inbound, e.Client, addr, e.Name, e.Link)
 		if ob == nil {
 			continue
 		}
@@ -450,7 +556,11 @@ func (s *Server) respondClash(c *gin.Context, entries []subEntry) {
 	proxies := []map[string]any{}
 	names := []string{}
 	for _, e := range entries {
-		proxy := clashProxy(&e.Inbound, e.Client, s.host(), e.Name)
+		addr := e.Address
+		if addr == "" {
+			addr = s.host()
+		}
+		proxy := clashProxy(&e.Inbound, e.Client, addr, e.Name)
 		if proxy == nil {
 			continue
 		}
@@ -476,7 +586,11 @@ func (s *Server) respondSingBox(c *gin.Context, entries []subEntry) {
 	outbounds := make([]map[string]any, 0, len(entries)+1)
 	tags := make([]string, 0, len(entries))
 	for _, e := range entries {
-		ob := singBoxOutbound(&e.Inbound, e.Client, s.host(), e.Name)
+		addr := e.Address
+		if addr == "" {
+			addr = s.host()
+		}
+		ob := singBoxOutbound(&e.Inbound, e.Client, addr, e.Name)
 		if ob == nil {
 			continue
 		}
@@ -553,14 +667,24 @@ func applyClashStream(p map[string]any, stream map[string]any, network, security
 	if securityMode == "reality" {
 		opts := map[string]any{}
 		if rs, ok := stream["realitySettings"].(map[string]any); ok {
-			if pbk, ok := rs["publicKey"].(string); ok {
+			if pbk := protocol.ResolveRealityPublicKey(rs); pbk != "" {
 				opts["public-key"] = pbk
 			}
 			if sid, ok := rs["shortIds"].([]any); ok && len(sid) > 0 {
 				opts["short-id"] = fmt.Sprint(sid[0])
+			} else if sid, ok := rs["shortIds"].([]string); ok && len(sid) > 0 {
+				opts["short-id"] = sid[0]
 			}
 			if sni, ok := rs["serverNames"].([]any); ok && len(sni) > 0 {
 				p["servername"] = fmt.Sprint(sni[0])
+			}
+			if settings, ok := rs["settings"].(map[string]any); ok {
+				if sni, _ := settings["serverName"].(string); sni != "" {
+					p["servername"] = sni
+				}
+				if fp, _ := settings["fingerprint"].(string); fp != "" {
+					p["client-fingerprint"] = fp
+				}
 			}
 			if fp, ok := rs["fingerprint"].(string); ok {
 				p["client-fingerprint"] = fp
@@ -853,7 +977,15 @@ func singBoxTLS(stream map[string]any, securityMode string) map[string]any {
 			if sni, ok := rs["serverNames"].([]any); ok && len(sni) > 0 {
 				tls["server_name"] = fmt.Sprint(sni[0])
 			}
-			if pbk, ok := rs["publicKey"].(string); ok {
+			if settings, ok := rs["settings"].(map[string]any); ok {
+				if sni, _ := settings["serverName"].(string); sni != "" {
+					tls["server_name"] = sni
+				}
+				if fp, _ := settings["fingerprint"].(string); fp != "" {
+					tls["utls"] = map[string]any{"enabled": true, "fingerprint": fp}
+				}
+			}
+			if pbk := protocol.ResolveRealityPublicKey(rs); pbk != "" {
 				tls["reality"].(map[string]any)["public_key"] = pbk
 			}
 			if sid, ok := rs["shortIds"].([]any); ok && len(sid) > 0 {
@@ -916,39 +1048,6 @@ func singBoxTransport(stream map[string]any, network string) map[string]any {
 		return tr
 	default:
 		return nil
-	}
-}
-
-// PublicBaseURL builds the subscription base URL (without subId).
-func PublicBaseURL(_ string) string {
-	host := database.GetSetting("subHost")
-	if host == "" || !security.ValidShareHost(host) {
-		host = "127.0.0.1"
-	}
-	port := database.GetSetting("subPort")
-	if port == "" {
-		port = "2096"
-	}
-	path := NormalizePath(database.GetSetting("subPath"))
-	scheme := "http"
-	if database.GetSetting("certFile") != "" && database.GetSetting("keyFile") != "" {
-		scheme = "https"
-	}
-	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
-		return fmt.Sprintf("%s://%s%s", scheme, host, path)
-	}
-	return fmt.Sprintf("%s://%s:%s%s", scheme, host, port, path)
-}
-
-// ClientSubURLs returns absolute subscription links for a subId.
-func ClientSubURLs(subID string) map[string]string {
-	base := strings.TrimSuffix(PublicBaseURL(""), "/") + "/" + subID
-	return map[string]string{
-		"auto":    base,
-		"base64":  base + "?format=base64",
-		"clash":   base + "/clash",
-		"singbox": base + "/singbox",
-		"json":    base + "/json",
 	}
 }
 

@@ -3,6 +3,7 @@ package protocol
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/we1bboard/we1bboard/internal/database/model"
@@ -148,9 +149,30 @@ func splitCSV(s string) []string {
 	return out
 }
 
+// ShareResult is one generated client link with the address/inbound used to build it.
+type ShareResult struct {
+	Link    string
+	Address string
+	Inbound model.Inbound
+}
+
 // ShareLinksForHosts builds one share link per enabled matching host.
 // If hosts is empty, returns a single link with defaultHost (current behavior).
 func ShareLinksForHosts(in *model.Inbound, c model.Client, defaultHost string, hosts []model.Host) ([]string, error) {
+	results, err := ShareResultsForHosts(in, c, defaultHost, hosts)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(results))
+	for _, r := range results {
+		out = append(out, r.Link)
+	}
+	return out, nil
+}
+
+// ShareResultsForHosts is like ShareLinksForHosts but also returns the address and patched inbound
+// used for each link (needed by Clash/sing-box so Host overrides apply).
+func ShareResultsForHosts(in *model.Inbound, c model.Client, defaultHost string, hosts []model.Host) ([]ShareResult, error) {
 	adap, err := Get(in.Protocol)
 	if err != nil {
 		return nil, err
@@ -169,9 +191,9 @@ func ShareLinksForHosts(in *model.Inbound, c model.Client, defaultHost string, h
 		if err != nil {
 			return nil, err
 		}
-		return []string{link}, nil
+		return []ShareResult{{Link: link, Address: defaultHost, Inbound: *in}}, nil
 	}
-	out := make([]string, 0, len(matched))
+	out := make([]ShareResult, 0, len(matched))
 	for _, h := range matched {
 		addr := strings.TrimSpace(h.Address)
 		if addr == "" {
@@ -185,7 +207,7 @@ func ShareLinksForHosts(in *model.Inbound, c model.Client, defaultHost string, h
 		if h.Remark != "" {
 			link = appendRemark(link, h.Remark)
 		}
-		out = append(out, link)
+		out = append(out, ShareResult{Link: link, Address: addr, Inbound: patched})
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("no share links generated")
@@ -194,9 +216,9 @@ func ShareLinksForHosts(in *model.Inbound, c model.Client, defaultHost string, h
 }
 
 func appendRemark(link, remark string) string {
+	enc := strings.ReplaceAll(url.QueryEscape(remark), "+", "%20")
 	if i := strings.LastIndex(link, "#"); i >= 0 {
-		base := link[:i]
-		return base + "#" + strings.ReplaceAll(remark, " ", "%20")
+		return link[:i] + "#" + enc
 	}
-	return link + "#" + strings.ReplaceAll(remark, " ", "%20")
+	return link + "#" + enc
 }

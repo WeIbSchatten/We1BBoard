@@ -55,7 +55,7 @@ func (s *Server) maybeServeSubPage(c *gin.Context, subID string) bool {
 }
 
 func (s *Server) serveHTMLPage(c *gin.Context, subID string, entries []subEntry, full bool) {
-	urls := ClientSubURLs(subID)
+	urls := ClientSubURLs(subID, c.Request.Host)
 	pd, up, down, total := buildPageData(subID, entries, urls, full)
 
 	c.Header("Content-Type", "text/html; charset=utf-8")
@@ -188,7 +188,7 @@ func (s *Server) handleQR(c *gin.Context) {
 		c.Status(http.StatusNotFound)
 		return
 	}
-	url := ClientSubURLs(subID)["auto"]
+	url := ClientSubURLs(subID, c.Request.Host)["auto"]
 	png, err := qrcode.Encode(url, qrcode.Medium, 256)
 	if err != nil {
 		c.String(http.StatusInternalServerError, "error")
@@ -209,7 +209,7 @@ func (s *Server) serveInfoJSON(c *gin.Context, subID string) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "error"})
 		return
 	}
-	pd, up, down, total := buildPageData(subID, entries, ClientSubURLs(subID), false)
+	pd, up, down, total := buildPageData(subID, entries, ClientSubURLs(subID, c.Request.Host), false)
 	vm := customPageVM(pd, up, down, total)
 	delete(vm, "links")
 	delete(vm, "Links")

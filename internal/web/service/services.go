@@ -86,6 +86,7 @@ func (s *InboundService) Create(in *model.Inbound) error {
 	if in.StreamSettings == "" {
 		in.StreamSettings = `{"network":"tcp","security":"none"}`
 	}
+	in.StreamSettings = protocol.EnsureRealityPublicKey(in.StreamSettings)
 	if in.Sniffing == "" {
 		in.Sniffing = protocol.MustJSON(protocol.DefaultSniffing())
 	}
@@ -133,6 +134,7 @@ func (s *InboundService) Update(in *model.Inbound) error {
 		in.ExpiryTime = old.ExpiryTime
 	}
 	in.CreatedAt = old.CreatedAt
+	in.StreamSettings = protocol.EnsureRealityPublicKey(in.StreamSettings)
 	if err := database.DB.Save(in).Error; err != nil {
 		return err
 	}
@@ -565,23 +567,40 @@ func (s *ClientService) ShareLink(id uint, host string) (string, error) {
 	return strings.Join(links, "\n"), nil
 }
 
-// ShareLinks returns one link per subscription host (or a single default link).
+// ShareLinks returns share links for all attached inbounds (and hosts).
 func (s *ClientService) ShareLinks(id uint, host string) ([]string, error) {
 	var c model.Client
 	if err := database.DB.First(&c, id).Error; err != nil {
 		return nil, err
 	}
-	var in model.Inbound
-	if err := database.DB.First(&in, c.InboundID).Error; err != nil {
-		return nil, err
-	}
 	if host == "" {
-		host = database.GetSetting("subHost")
-		if host == "" {
-			host = "127.0.0.1"
-		}
+		host = sub.DefaultShareHost("")
 	}
-	return BuildShareLinks(&in, c, host)
+	ids := model.ParseInboundIDList(&c)
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("client has no inbound")
+	}
+	var hosts []model.Host
+	_ = database.DB.Where("enable = ?", true).Order("sort_order asc, id asc").Find(&hosts).Error
+	out := make([]string, 0, len(ids))
+	for _, iid := range ids {
+		var in model.Inbound
+		if err := database.DB.First(&in, iid).Error; err != nil {
+			continue
+		}
+		if !in.Enable {
+			continue
+		}
+		links, err := protocol.ShareLinksForHosts(&in, c, host, hosts)
+		if err != nil {
+			continue
+		}
+		out = append(out, links...)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no share links generated")
+	}
+	return out, nil
 }
 
 type AuthService struct{}

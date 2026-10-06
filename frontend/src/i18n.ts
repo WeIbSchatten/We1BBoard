@@ -192,6 +192,12 @@ const dict = {
     confirmDeleteBalancer: 'Удалить sub balancer?',
     confirmResetGroup: 'Сбросить трафик группы?',
     tgproxyHint: 'Управление tproxy-server (Telegram WEB proxy)',
+    subHostHint: 'Пустой subHost = хост запроса панели; укажите публичный IP/домен для корректных share-ссылок.',
+    subPortHint: 'Без TLS-сертификатов подписка на порту панели (эффективный порт ниже); отдельный subPort только с certFile+keyFile.',
+    subPreviewUrl: 'Превью URL подписки',
+    subEffectivePort: 'Эффективный порт',
+    subModeDedicated: 'Отдельный порт (TLS)',
+    subModePanel: 'Порт панели',
   },
   en: {
     brand: 'We1BBoard',
@@ -384,6 +390,12 @@ const dict = {
     confirmDeleteBalancer: 'Delete this sub balancer?',
     confirmResetGroup: 'Reset traffic for this group?',
     tgproxyHint: 'Manage tproxy-server (Telegram WEB proxy)',
+    subHostHint: 'Empty subHost = use panel request host; set public IP/domain for correct share links.',
+    subPortHint: 'Without TLS certs, subscription mounts on panel port (effective port shown); dedicated subPort only with certFile+keyFile.',
+    subPreviewUrl: 'Subscription preview URL',
+    subEffectivePort: 'Effective port',
+    subModeDedicated: 'Dedicated port (TLS)',
+    subModePanel: 'Panel port',
   },
 } as const
 

@@ -6,8 +6,11 @@ import { ConfirmModal } from '../components/ConfirmModal'
 type SubInfo = {
   enable: boolean
   subPort: string
+  subPortSetting?: string
   subPath: string
   subHost: string
+  subHostSetting?: string
+  dedicated?: boolean
   baseUrl: string
   formats: string[]
 }
@@ -304,7 +307,21 @@ export function SettingsPage() {
           </label>
         </div>
         <div className="section-title">Endpoints</div>
-        {(['subPort', 'subPath', 'subHost', 'subTitle', 'subSupportUrl', 'subThemeDir', 'subAnnounce'] as const).map((k) => (
+        <div className="field">
+          <label className="label">{label('subPort')}</label>
+          <input className="input" value={settings.subPort || ''} onChange={(e) => setSettings({ ...settings, subPort: e.target.value })} />
+          <p className="page-sub">{tr('subPortHint')}</p>
+        </div>
+        <div className="field">
+          <label className="label">{label('subPath')}</label>
+          <input className="input" value={settings.subPath || ''} onChange={(e) => setSettings({ ...settings, subPath: e.target.value })} />
+        </div>
+        <div className="field">
+          <label className="label">{label('subHost')}</label>
+          <input className="input" value={settings.subHost || ''} onChange={(e) => setSettings({ ...settings, subHost: e.target.value })} />
+          <p className="page-sub">{tr('subHostHint')}</p>
+        </div>
+        {(['subTitle', 'subSupportUrl', 'subThemeDir', 'subAnnounce'] as const).map((k) => (
           <div className="field" key={k}>
             <label className="label">{label(k)}</label>
             <input className="input" value={settings[k] || ''} onChange={(e) => setSettings({ ...settings, [k]: e.target.value })} placeholder={k === 'subThemeDir' ? '/etc/we1bboard/sub_templates/my-theme' : undefined} />
@@ -329,10 +346,25 @@ export function SettingsPage() {
         ))}
         <p className="page-sub">Browsers get an HTML page; VPN clients get raw. Full page: <code>?html=1</code>. Custom theme: folder with <code>sub.html</code> or <code>index.html</code>.</p>
         {subInfo && (
-          <div className="field">
-            <label className="label">Base URL</label>
-            <input className="input" readOnly value={subInfo.baseUrl + '{subId}'} />
-            <p className="page-sub">Formats: {subInfo.formats.join(', ')} · port {subInfo.subPort || '2096'}</p>
+          <div className="field" style={{ marginTop: 8 }}>
+            <label className="label">{tr('subPreviewUrl')}</label>
+            <input
+              className="input"
+              readOnly
+              value={(subInfo.baseUrl || '') + '{subId}'}
+              style={{ fontWeight: 600, letterSpacing: 0.2 }}
+            />
+            <p className="page-sub" style={{ marginTop: 6 }}>
+              {tr('subEffectivePort')}: <code>{subInfo.subPort || '—'}</code>
+              {subInfo.subPortSetting && subInfo.subPortSetting !== subInfo.subPort
+                ? ` (setting: ${subInfo.subPortSetting})`
+                : ''}
+              {' · '}
+              {subInfo.dedicated ? tr('subModeDedicated') : tr('subModePanel')}
+              {' · '}
+              host: <code>{subInfo.subHost || '—'}</code>
+              {subInfo.formats?.length ? ` · ${subInfo.formats.join(', ')}` : ''}
+            </p>
           </div>
         )}
         <button className="btn" onClick={save}>{tr('save')}</button>
