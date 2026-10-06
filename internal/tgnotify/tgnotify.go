@@ -199,6 +199,16 @@ func NotifyLogin(username, ip string) {
 	_ = SendMessage(token, chatID, msg)
 }
 
+// NotifyTraffic sends a traffic alert when tgNotifyTraffic is enabled.
+func NotifyTraffic(text string) {
+	if !Enabled() || !SettingTruthy(database.GetSetting("tgNotifyTraffic")) {
+		return
+	}
+	token := database.GetSetting("tgBotToken")
+	chatID := database.GetSetting("tgBotChatId")
+	_ = SendMessage(token, chatID, text)
+}
+
 // Test sends a test message using current settings (or overrides from the request).
 func Test(token, chatID string) error {
 	if token == "" {

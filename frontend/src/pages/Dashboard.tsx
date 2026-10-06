@@ -138,6 +138,13 @@ export function DashboardPage() {
         </div>
       </div>
 
+      <div className="toolbar" style={{ marginBottom: '1.1rem' }}>
+        <Link className="btn secondary" to="/inbounds">{tr('inbounds')}</Link>
+        <Link className="btn secondary" to="/clients">{tr('clients')}</Link>
+        <Link className="btn secondary" to="/logs">{tr('logs')}</Link>
+        <span className="toolbar-spacer" />
+      </div>
+
       <div className="stat-grid">
         <Link to="/xray" className="stat stat-link">
           <div className="k">{tr('status')} Xray</div>

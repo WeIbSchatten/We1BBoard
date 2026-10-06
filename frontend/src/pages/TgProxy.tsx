@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { api, type TgProxy } from '../api'
 import { useApp } from '../AppContext'
+import { ConfirmModal } from '../components/ConfirmModal'
 
 export function TgProxyPage() {
   const { tr } = useApp()
@@ -19,6 +20,7 @@ export function TgProxyPage() {
     remark: '',
   })
   const [msg, setMsg] = useState('')
+  const [confirmId, setConfirmId] = useState<number | null>(null)
 
   async function load() { setRows(await api<TgProxy[]>('/tgproxy')) }
   useEffect(() => { load().catch(console.error) }, [])
@@ -52,31 +54,37 @@ export function TgProxyPage() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div className="page-head">
         <div>
           <h1 className="page-title">{tr('tgproxy')}</h1>
-          <p className="page-sub">Управление tproxy-server (Telegram WEB proxy)</p>
+          <p className="page-sub">{tr('tgproxyHint')}</p>
         </div>
         <button className="btn" onClick={() => setOpen(true)}>{tr('create')}</button>
       </div>
-      {msg && <p className="page-sub">{msg}</p>}
+      {msg && <div className="alert success">{msg}</div>}
       <div className="card">
         <table className="table">
           <thead>
             <tr><th>Name</th><th>Hostname</th><th>Carrier</th><th>MTProxy</th><th>{tr('actions')}</th></tr>
           </thead>
           <tbody>
-            {rows.length === 0 && <tr><td colSpan={5}>{tr('empty')}</td></tr>}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={5}>
+                  <div className="empty-state">{tr('empty')}</div>
+                </td>
+              </tr>
+            )}
             {rows.map((p) => (
               <tr key={p.id}>
                 <td>{p.name}</td>
-                <td>{p.hostname}</td>
-                <td>{p.carrierMode}</td>
-                <td>{p.mtproxyAddr}</td>
+                <td><code style={{ fontFamily: 'var(--mono)', fontSize: '0.85rem' }}>{p.hostname}</code></td>
+                <td><span className="tag">{p.carrierMode}</span></td>
+                <td><code style={{ fontFamily: 'var(--mono)', fontSize: '0.85rem' }}>{p.mtproxyAddr}</code></td>
                 <td className="row-actions">
-                  <button className="btn secondary" onClick={() => start(p.id)}>{tr('start')}</button>
-                  <button className="btn secondary" onClick={() => stop(p.id)}>{tr('stop')}</button>
-                  <button className="btn danger" onClick={() => remove(p.id)}>{tr('delete')}</button>
+                  <button className="btn btn-sm secondary" onClick={() => start(p.id)}>{tr('start')}</button>
+                  <button className="btn btn-sm secondary" onClick={() => stop(p.id)}>{tr('stop')}</button>
+                  <button className="btn btn-sm danger" onClick={() => setConfirmId(p.id)}>{tr('delete')}</button>
                 </td>
               </tr>
             ))}
@@ -111,13 +119,26 @@ export function TgProxyPage() {
                 </select>
               </div>
             </div>
-            <div className="row-actions">
-              <button className="btn" type="submit">{tr('save')}</button>
-              <button className="btn secondary" type="button" onClick={() => setOpen(false)}>Cancel</button>
+            <div className="modal-footer">
+              <button className="btn secondary btn-sm" type="button" onClick={() => setOpen(false)}>{tr('cancel')}</button>
+              <button className="btn btn-sm" type="submit">{tr('save')}</button>
             </div>
           </form>
         </div>
       )}
+
+      <ConfirmModal
+        open={confirmId != null}
+        title={tr('confirmDeleteTitle')}
+        message={tr('confirmDeleteTgProxy')}
+        danger
+        onCancel={() => setConfirmId(null)}
+        onConfirm={() => {
+          const id = confirmId
+          setConfirmId(null)
+          if (id != null) void remove(id)
+        }}
+      />
     </div>
   )
 }

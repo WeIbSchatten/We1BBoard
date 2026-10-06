@@ -82,6 +82,7 @@ func runServer() {
 	srv := web.NewServer(cfg, xrayMgr, extraMgr, tgMgr)
 	job.Start(srv.RT)
 	job.StartAccessLogSampler(xrayMgr)
+	job.StartTrafficReset()
 	// Outbound subscription auto-refresh needs the API helpers; build a lightweight handle.
 	apiForJobs := &controller.API{RT: srv.RT, Cfg: cfg, Xray: xrayMgr}
 	job.StartOutboundSubRefresh(apiForJobs)

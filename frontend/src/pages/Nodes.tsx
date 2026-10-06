@@ -1,6 +1,7 @@
 import { FormEvent, Fragment, useEffect, useState } from 'react'
 import { api, type Node } from '../api'
 import { useApp } from '../AppContext'
+import { ConfirmModal } from '../components/ConfirmModal'
 
 type NodeHistory = { online: number[]; latency: number[] }
 
@@ -32,6 +33,7 @@ export function NodesPage() {
   const [expanded, setExpanded] = useState<number | null>(null)
   const [hist, setHist] = useState<Record<number, NodeHistory>>({})
   const [form, setForm] = useState({ name: '', url: '', token: '', tlsMode: 'verify', region: 'eu', enable: true })
+  const [confirmId, setConfirmId] = useState<number | null>(null)
 
   async function load() { setRows(await api<Node[]>('/nodes')) }
   useEffect(() => { load().catch(console.error) }, [])
@@ -71,14 +73,14 @@ export function NodesPage() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div className="page-head">
         <div>
           <h1 className="page-title">{tr('nodes')}</h1>
           <p className="page-sub">Remote We1BBoard instances (multi-node)</p>
         </div>
-        <div className="row-actions">
-          <button className="btn secondary" onClick={ping}>Ping</button>
-          <button className="btn" onClick={() => setOpen(true)}>{tr('create')}</button>
+        <div className="toolbar">
+          <button className="btn secondary btn-sm" onClick={ping}>Ping</button>
+          <button className="btn btn-sm" onClick={() => setOpen(true)}>{tr('create')}</button>
         </div>
       </div>
       <div className="card">
@@ -96,7 +98,7 @@ export function NodesPage() {
                   <td>{n.region}</td>
                   <td><span className={`badge ${n.online ? 'on' : 'off'}`}>{n.online ? 'online' : 'offline'}</span></td>
                   <td onClick={(e) => e.stopPropagation()}>
-                    <button className="btn danger" onClick={() => remove(n.id)}>{tr('delete')}</button>
+                    <button className="btn btn-sm danger" onClick={() => setConfirmId(n.id)}>{tr('delete')}</button>
                   </td>
                 </tr>
                 {expanded === n.id && (
@@ -139,13 +141,26 @@ export function NodesPage() {
                 <option value="mtls">mtls</option>
               </select>
             </div>
-            <div className="row-actions">
-              <button className="btn" type="submit">{tr('save')}</button>
-              <button className="btn secondary" type="button" onClick={() => setOpen(false)}>Cancel</button>
+            <div className="modal-footer">
+              <button className="btn secondary btn-sm" type="button" onClick={() => setOpen(false)}>{tr('cancel')}</button>
+              <button className="btn btn-sm" type="submit">{tr('save')}</button>
             </div>
           </form>
         </div>
       )}
+
+      <ConfirmModal
+        open={confirmId != null}
+        title={tr('confirmDeleteTitle')}
+        message={tr('confirmDeleteNode')}
+        danger
+        onCancel={() => setConfirmId(null)}
+        onConfirm={() => {
+          const id = confirmId
+          setConfirmId(null)
+          if (id != null) void remove(id)
+        }}
+      />
     </div>
   )
 }

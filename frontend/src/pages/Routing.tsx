@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type Inbound, type Outbound } from '../api'
 import { useApp } from '../AppContext'
+import { ConfirmModal } from '../components/ConfirmModal'
 import { RoutingFormModal, type RoutingRule } from '../components/RoutingFormModal'
 
 const DOMAIN_STRATEGIES = ['AsIs', 'IPIfNonMatch', 'IPOnDemand'] as const
@@ -101,6 +102,7 @@ export function RoutingPage() {
   const [modal, setModal] = useState<{ open: boolean; mode: 'add' | 'edit'; rule: RoutingRule | null }>({
     open: false, mode: 'add', rule: null,
   })
+  const [confirmId, setConfirmId] = useState<number | null>(null)
 
   async function load() {
     const [r, ib, ob, settings] = await Promise.all([
@@ -150,7 +152,6 @@ export function RoutingPage() {
   }
 
   async function remove(id: number) {
-    if (!confirm('Delete rule?')) return
     await api(`/routing/${id}`, { method: 'DELETE' })
     await load()
   }
@@ -228,14 +229,27 @@ export function RoutingPage() {
                 <td>{[r.domain, r.ip, r.port, r.network, r.protocol].filter(Boolean).join(' / ') || '—'}</td>
                 <td><span className={`badge ${r.enable ? 'on' : 'off'}`}>{r.enable ? tr('enable') : tr('disable')}</span></td>
                 <td className="row-actions">
-                  <button className="btn secondary" onClick={() => setModal({ open: true, mode: 'edit', rule: r })}>{tr('edit')}</button>
-                  <button className="btn danger" onClick={() => remove(r.id)}>{tr('delete')}</button>
+                  <button className="btn btn-sm secondary" onClick={() => setModal({ open: true, mode: 'edit', rule: r })}>{tr('edit')}</button>
+                  <button className="btn btn-sm danger" onClick={() => setConfirmId(r.id)}>{tr('delete')}</button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      <ConfirmModal
+        open={confirmId != null}
+        title={tr('confirmDeleteTitle')}
+        message={tr('confirmDeleteRule')}
+        danger
+        onCancel={() => setConfirmId(null)}
+        onConfirm={() => {
+          const id = confirmId
+          setConfirmId(null)
+          if (id != null) void remove(id)
+        }}
+      />
 
       <RoutingFormModal
         open={modal.open}

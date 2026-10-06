@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { api, type Outbound, type OutboundSubscription } from '../api'
 import { useApp } from '../AppContext'
+import { ConfirmModal } from '../components/ConfirmModal'
 import { OutboundFormModal } from '../components/OutboundFormModal'
 
 type SubForm = {
@@ -33,6 +34,7 @@ export function OutboundsPage() {
   const [latency, setLatency] = useState<Record<number, LatencyResult>>({})
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
+  const [confirm, setConfirm] = useState<{ kind: 'outbound' | 'sub'; id: number } | null>(null)
 
   function isProxy(o: Outbound) {
     if (['direct', 'blocked', 'block', 'blackhole'].includes(o.tag)) return false
@@ -50,7 +52,6 @@ export function OutboundsPage() {
   useEffect(() => { load().catch(console.error) }, [])
 
   async function remove(id: number) {
-    if (!confirm('Delete outbound?')) return
     await api(`/outbounds/${id}`, { method: 'DELETE' })
     await load()
   }
@@ -83,6 +84,23 @@ export function OutboundsPage() {
         }),
       })
       setMsg(data.note || 'WARP placeholder added — fill address / peer key / reserved from warp-cli')
+      await load()
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function applyWarp() {
+    setBusy(true)
+    setMsg('')
+    try {
+      const data = await api<{
+        outbound: Outbound
+        note: string
+      }>('/xray/warp/apply', { method: 'POST' })
+      setMsg(data.note || `WARP outbound created (disabled): ${data.outbound?.tag || 'warp'}`)
       await load()
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'error')
@@ -169,7 +187,6 @@ export function OutboundsPage() {
   }
 
   async function deleteSub(id: number) {
-    if (!confirm('Delete subscription?')) return
     await api(`/outbound-subs/${id}`, { method: 'DELETE' })
     await load()
   }
@@ -236,6 +253,9 @@ export function OutboundsPage() {
           <button className="btn secondary" type="button" disabled={busy} onClick={() => void addWarp()}>
             {tr('addWarp')}
           </button>
+          <button className="btn secondary" type="button" disabled={busy} onClick={() => void applyWarp()}>
+            {tr('createWarp')}
+          </button>
           <button className="btn secondary" type="button" disabled={busy} onClick={() => void addVpnPlaceholder('nord')}>
             {tr('addNord')}
           </button>
@@ -272,11 +292,11 @@ export function OutboundsPage() {
                 <td>{latencyBadge(o.id) || '—'}</td>
                 <td className="row-actions">
                   {isProxy(o) && (
-                    <button className="btn secondary" type="button" disabled={busy} onClick={() => void testOne(o.id)}>{tr('test')}</button>
+                    <button className="btn btn-sm secondary" type="button" disabled={busy} onClick={() => void testOne(o.id)}>{tr('test')}</button>
                   )}
-                  <button className="btn secondary" type="button" onClick={() => setModal({ open: true, mode: 'edit', outbound: o })}>{tr('edit')}</button>
+                  <button className="btn btn-sm secondary" type="button" onClick={() => setModal({ open: true, mode: 'edit', outbound: o })}>{tr('edit')}</button>
                   {!['direct', 'blocked'].includes(o.tag) && (
-                    <button className="btn danger" type="button" onClick={() => remove(o.id)}>{tr('delete')}</button>
+                    <button className="btn btn-sm danger" type="button" onClick={() => setConfirm({ kind: 'outbound', id: o.id })}>{tr('delete')}</button>
                   )}
                 </td>
               </tr>
@@ -358,9 +378,9 @@ export function OutboundsPage() {
                   {s.lastError && <div className="page-sub" style={{ color: 'var(--danger)' }}>{s.lastError}</div>}
                 </td>
                 <td className="row-actions">
-                  <button className="btn secondary" type="button" disabled={busy} onClick={() => void refreshSub(s.id)}>{tr('refresh')}</button>
-                  <button className="btn secondary" type="button" onClick={() => startEdit(s)}>{tr('edit')}</button>
-                  <button className="btn danger" type="button" onClick={() => void deleteSub(s.id)}>{tr('delete')}</button>
+                  <button className="btn btn-sm secondary" type="button" disabled={busy} onClick={() => void refreshSub(s.id)}>{tr('refresh')}</button>
+                  <button className="btn btn-sm secondary" type="button" onClick={() => startEdit(s)}>{tr('edit')}</button>
+                  <button className="btn btn-sm danger" type="button" onClick={() => setConfirm({ kind: 'sub', id: s.id })}>{tr('delete')}</button>
                 </td>
               </tr>
             ))}
@@ -374,6 +394,21 @@ export function OutboundsPage() {
         outbound={modal.outbound}
         onClose={() => setModal({ open: false, mode: 'add', outbound: null })}
         onSaved={() => { void load() }}
+      />
+
+      <ConfirmModal
+        open={!!confirm}
+        title={tr('confirmDeleteTitle')}
+        message={confirm?.kind === 'sub' ? tr('confirmDeleteSub') : tr('confirmDeleteOutbound')}
+        danger
+        onCancel={() => setConfirm(null)}
+        onConfirm={() => {
+          const c = confirm
+          setConfirm(null)
+          if (!c) return
+          if (c.kind === 'sub') void deleteSub(c.id)
+          else void remove(c.id)
+        }}
       />
     </div>
   )

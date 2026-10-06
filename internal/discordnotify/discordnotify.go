@@ -136,6 +136,15 @@ func NotifyLogin(username, ip string) {
 	_ = Send(webhook, msg)
 }
 
+// NotifyTraffic sends a traffic alert when discordNotifyTraffic is enabled.
+func NotifyTraffic(text string) {
+	if !Enabled() || !tgnotify.SettingTruthy(database.GetSetting("discordNotifyTraffic")) {
+		return
+	}
+	webhook := database.GetSetting("discordWebhook")
+	_ = Send(webhook, text)
+}
+
 // Test sends a test message using the stored (or override) webhook.
 func Test(webhookURL string) error {
 	if webhookURL == "" || webhookURL == "***" || strings.Contains(webhookURL, "…") {

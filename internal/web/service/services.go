@@ -415,7 +415,11 @@ func (s *ClientService) Delete(id uint) error {
 
 // ResetTraffic zeroes up/down counters for a client.
 func (s *ClientService) ResetTraffic(id uint) error {
-	res := database.DB.Model(&model.Client{}).Where("id = ?", id).Updates(map[string]any{"up": 0, "down": 0})
+	res := database.DB.Model(&model.Client{}).Where("id = ?", id).Updates(map[string]any{
+		"up":                 0,
+		"down":               0,
+		"last_traffic_reset": time.Now().UnixMilli(),
+	})
 	if res.Error != nil {
 		return res.Error
 	}

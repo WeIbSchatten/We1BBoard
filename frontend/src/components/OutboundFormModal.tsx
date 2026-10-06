@@ -197,7 +197,7 @@ export function OutboundFormModal({ open, mode, outbound, onClose, onSaved }: Pr
           </div>
         </div>
 
-        <div className="tabs" style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+        <div className="tabs">
           <button type="button" className={`tab ${tab === 'basic' ? 'active' : ''}`} onClick={() => setTab('basic')}>{tr('tabGeneral')}</button>
           {isProxy && (
             <button type="button" className={`tab ${tab === 'stream' ? 'active' : ''}`} onClick={() => setTab('stream')}>{tr('tabNetwork')} / {tr('tabSecurity')}</button>
@@ -362,19 +362,6 @@ export function OutboundFormModal({ open, mode, outbound, onClose, onSaved }: Pr
           <button className="btn secondary" type="button" onClick={onClose}>{tr('cancel')}</button>
         </div>
       </form>
-      <style>{`
-        .tab {
-          border: 1px solid var(--border);
-          background: transparent;
-          color: var(--text-muted);
-          border-radius: 999px;
-          padding: 0.4rem 0.85rem;
-          cursor: pointer;
-          font-weight: 600;
-          font-size: 0.85rem;
-        }
-        .tab.active { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
-      `}</style>
     </div>
   )
 }

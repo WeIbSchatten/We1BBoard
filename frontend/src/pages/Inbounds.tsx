@@ -3,10 +3,16 @@ import { api, type Client, type Inbound, type OnlineClients } from '../api'
 import { useApp } from '../AppContext'
 import { ClientFormModal } from '../components/ClientFormModal'
 import { ClientInfoModal } from '../components/ClientInfoModal'
+import { ConfirmModal } from '../components/ConfirmModal'
 import { InboundFormModal } from '../components/InboundFormModal'
+import { TrafficBar } from '../components/TrafficBar'
 import { inboundSupportsClients } from '../lib/inboundForm'
 
 type RateRow = { id: number; upRate: number; downRate: number }
+
+type ConfirmKind =
+  | { kind: 'inbound'; id: number }
+  | { kind: 'client'; id: number }
 
 function formatRate(bps: number): string {
   if (!bps || bps < 1) return '0 B/s'
@@ -18,6 +24,10 @@ function formatRate(bps: number): string {
     i++
   }
   return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`
+}
+
+function usedGB(c: Client) {
+  return ((c.up || 0) + (c.down || 0)) / (1024 * 1024 * 1024)
 }
 
 export function InboundsPage() {
@@ -35,6 +45,7 @@ export function InboundsPage() {
   const [infoTab, setInfoTab] = useState<'info' | 'links' | 'sub' | 'qr'>('info')
   const [pendingClientInbound, setPendingClientInbound] = useState<Inbound | null>(null)
   const [onlineMap, setOnlineMap] = useState<Record<string, number>>({})
+  const [confirm, setConfirm] = useState<ConfirmKind | null>(null)
 
   async function load() {
     setRows(await api<Inbound[]>('/inbounds'))
@@ -73,14 +84,12 @@ export function InboundsPage() {
   }, [pendingClientInbound, rows])
 
   async function removeInbound(id: number) {
-    if (!confirm('Delete inbound?')) return
     await api(`/inbounds/${id}`, { method: 'DELETE' })
     if (expanded === id) setExpanded(null)
     await load()
   }
 
   async function removeClient(id: number) {
-    if (!confirm('Delete client?')) return
     await api(`/clients/${id}`, { method: 'DELETE' })
     await load()
   }
@@ -102,13 +111,6 @@ export function InboundsPage() {
     setExpanded(created.id)
   }
 
-  function traffic(c: Client) {
-    const used = ((c.up || 0) + (c.down || 0)) / (1024 * 1024 * 1024)
-    const total = c.totalGB || 0
-    if (total <= 0) return `${used.toFixed(2)} GB / ∞`
-    return `${used.toFixed(2)} / ${total} GB`
-  }
-
   function expiryLabel(c: Client) {
     if (!c.expiryTime) return '∞'
     return new Date(c.expiryTime).toLocaleDateString()
@@ -121,11 +123,11 @@ export function InboundsPage() {
           <h1 className="page-title">{tr('inbounds')}</h1>
           <p className="page-sub">{tr('inboundsHint')}</p>
         </div>
-        <div className="row-actions">
-          <button className="btn secondary" type="button" onClick={() => { void disableInvalid() }}>
+        <div className="toolbar">
+          <button className="btn secondary btn-sm" type="button" onClick={() => { void disableInvalid() }}>
             {tr('disableInvalidInbounds')}
           </button>
-          <button className="btn" onClick={() => setInboundModal({ open: true, mode: 'add', inbound: null })}>
+          <button className="btn btn-sm" onClick={() => setInboundModal({ open: true, mode: 'add', inbound: null })}>
             {tr('create')}
           </button>
         </div>
@@ -150,7 +152,11 @@ export function InboundsPage() {
           </thead>
           <tbody>
             {rows.length === 0 && (
-              <tr><td colSpan={11}>{tr('empty')}</td></tr>
+              <tr>
+                <td colSpan={11}>
+                  <div className="empty-state">{tr('empty')}</div>
+                </td>
+              </tr>
             )}
             {rows.map((r) => {
               let net = '—'
@@ -169,9 +175,9 @@ export function InboundsPage() {
                     <td>
                       <button
                         type="button"
-                        className="btn secondary"
-                        style={{ padding: '0.2rem 0.5rem' }}
+                        className="icon-btn"
                         onClick={() => setExpanded(open ? null : r.id)}
+                        aria-label={open ? 'Collapse' : 'Expand'}
                       >
                         {open ? '▾' : '▸'}
                       </button>
@@ -180,8 +186,8 @@ export function InboundsPage() {
                     <td>{r.remark || r.tag}</td>
                     <td><span className="badge">{r.protocol}</span></td>
                     <td><code style={{ fontFamily: 'var(--mono)' }}>{r.port}</code></td>
-                    <td><span className="badge">{net}</span></td>
-                    <td><span className="badge">{sec}</span></td>
+                    <td><span className="tag">{net}</span></td>
+                    <td><span className="tag">{sec}</span></td>
                     <td style={{ fontFamily: 'var(--mono)', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
                       <span style={{ color: 'var(--accent)' }}>↑{formatRate(rate?.upRate || 0)}</span>
                       {' '}
@@ -190,24 +196,24 @@ export function InboundsPage() {
                     <td>{clients.length}</td>
                     <td><span className={`badge ${r.enable ? 'on' : 'off'}`}>{r.enable ? tr('enable') : tr('disable')}</span></td>
                     <td className="row-actions">
-                      <button className="btn secondary" onClick={() => setInboundModal({ open: true, mode: 'edit', inbound: r })}>{tr('edit')}</button>
-                      <button className="btn secondary" onClick={() => { void cloneInbound(r.id) }}>{tr('clone')}</button>
+                      <button className="btn btn-sm secondary" onClick={() => setInboundModal({ open: true, mode: 'edit', inbound: r })}>{tr('edit')}</button>
+                      <button className="btn btn-sm secondary" onClick={() => { void cloneInbound(r.id) }}>{tr('clone')}</button>
                       {inboundSupportsClients(r.protocol) && (
-                        <button className="btn secondary" onClick={() => setClientModal({ open: true, mode: 'add', inbound: r, client: null })}>+ {tr('clients')}</button>
+                        <button className="btn btn-sm secondary" onClick={() => setClientModal({ open: true, mode: 'add', inbound: r, client: null })}>+ {tr('clients')}</button>
                       )}
-                      <button className="btn danger" onClick={() => removeInbound(r.id)}>{tr('delete')}</button>
+                      <button className="btn btn-sm danger" onClick={() => setConfirm({ kind: 'inbound', id: r.id })}>{tr('delete')}</button>
                     </td>
                   </tr>
                   {open && (
                     <tr>
                       <td colSpan={11} style={{ padding: '0.5rem 0.75rem 1rem' }}>
                         {clients.length === 0 ? (
-                          <p className="page-sub" style={{ margin: '0.5rem 0' }}>
-                            {tr('empty')} —{' '}
-                            <button type="button" className="btn secondary" onClick={() => setClientModal({ open: true, mode: 'add', inbound: r, client: null })}>
+                          <div className="empty-state" style={{ padding: '1.5rem 1rem' }}>
+                            <div>{tr('empty')}</div>
+                            <button type="button" className="btn btn-sm secondary" onClick={() => setClientModal({ open: true, mode: 'add', inbound: r, client: null })}>
                               {tr('create')} {tr('clients')}
                             </button>
-                          </p>
+                          </div>
                         ) : (
                           <table className="table" style={{ margin: 0 }}>
                             <thead>
@@ -225,18 +231,18 @@ export function InboundsPage() {
                                 <tr key={c.id}>
                                   <td>
                                     {c.email}{' '}
-                                    {onlineMap[c.email] ? <span className="badge on">{tr('online')}</span> : null}
+                                    {onlineMap[c.email] ? <span className="badge online">{tr('online')}</span> : null}
                                   </td>
                                   <td><code style={{ fontFamily: 'var(--mono)', fontSize: '0.8rem' }}>{c.uuid?.slice(0, 8)}…</code></td>
-                                  <td>{traffic(c)}</td>
+                                  <td><TrafficBar used={usedGB(c)} totalGB={c.totalGB || 0} /></td>
                                   <td>{expiryLabel(c)}</td>
                                   <td><span className={`badge ${c.enable ? 'on' : 'off'}`}>{c.enable ? tr('enable') : tr('disable')}</span></td>
                                   <td className="row-actions">
-                                    <button className="btn secondary" onClick={() => { setInfoTab('links'); setInfoClient(c) }}>{tr('link')}</button>
-                                    <button className="btn secondary" onClick={() => { setInfoTab('sub'); setInfoClient(c) }}>{tr('subscription')}</button>
-                                    <button className="btn secondary" onClick={() => { void resetTraffic(c.id) }}>{tr('resetTraffic')}</button>
-                                    <button className="btn secondary" onClick={() => setClientModal({ open: true, mode: 'edit', inbound: r, client: c })}>{tr('edit')}</button>
-                                    <button className="btn danger" onClick={() => removeClient(c.id)}>{tr('delete')}</button>
+                                    <button className="btn btn-sm secondary" onClick={() => { setInfoTab('links'); setInfoClient(c) }}>{tr('link')}</button>
+                                    <button className="btn btn-sm secondary" onClick={() => { setInfoTab('sub'); setInfoClient(c) }}>{tr('subscription')}</button>
+                                    <button className="btn btn-sm secondary" onClick={() => { void resetTraffic(c.id) }}>{tr('resetTraffic')}</button>
+                                    <button className="btn btn-sm secondary" onClick={() => setClientModal({ open: true, mode: 'edit', inbound: r, client: c })}>{tr('edit')}</button>
+                                    <button className="btn btn-sm danger" onClick={() => setConfirm({ kind: 'client', id: c.id })}>{tr('delete')}</button>
                                   </td>
                                 </tr>
                               ))}
@@ -252,6 +258,21 @@ export function InboundsPage() {
           </tbody>
         </table>
       </div>
+
+      <ConfirmModal
+        open={!!confirm}
+        title={tr('confirmDeleteTitle')}
+        message={confirm?.kind === 'inbound' ? tr('confirmDeleteInbound') : tr('confirmDeleteClient')}
+        danger
+        onCancel={() => setConfirm(null)}
+        onConfirm={() => {
+          const c = confirm
+          setConfirm(null)
+          if (!c) return
+          if (c.kind === 'inbound') void removeInbound(c.id)
+          else void removeClient(c.id)
+        }}
+      />
 
       <ClientInfoModal
         open={!!infoClient}

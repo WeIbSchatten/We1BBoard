@@ -168,10 +168,10 @@ export function ClientInfoModal({ open, client, inbounds = [], online = false, i
   }
 
   async function clearIps() {
-    if (!confirm(tr('clearIps') + '?')) return
+    if (!confirm(tr('clearIpsWarn') + '?')) return
     setBusy(true)
     try {
-      await api(`/clients/ips/${encEmail(client!.email)}`, { method: 'DELETE' })
+      await api(`/clients/${client!.id}/kick`, { method: 'POST' })
       setIps([])
       setMsg('OK')
     } catch (e) {
@@ -234,7 +234,7 @@ export function ClientInfoModal({ open, client, inbounds = [], online = false, i
           <button type="button" className="btn secondary" onClick={onClose}>{tr('cancel')}</button>
         </div>
 
-        <div className="tabs" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+        <div className="tabs">
           {tabs.map((t) => (
             <button
               key={t.id}
@@ -371,7 +371,7 @@ export function ClientInfoModal({ open, client, inbounds = [], online = false, i
           <div>
             <div className="row-actions" style={{ marginBottom: 8 }}>
               <button type="button" className="btn secondary" disabled={busy} onClick={() => void loadIps()}>{tr('refresh')}</button>
-              <button type="button" className="btn danger" disabled={busy || ips.length === 0} onClick={() => void clearIps()}>{tr('clearIps')}</button>
+              <button type="button" className="btn danger" disabled={busy || ips.length === 0} onClick={() => void clearIps()}>{tr('clearIpsWarn')}</button>
             </div>
             {busy && <p className="page-sub">…</p>}
             {ips.length === 0 && !busy && <p className="page-sub">{tr('empty')}</p>}
@@ -433,24 +433,6 @@ export function ClientInfoModal({ open, client, inbounds = [], online = false, i
         )}
 
         {msg && <p className="page-sub" style={{ marginTop: 10 }}>{msg}</p>}
-
-        <style>{`
-          .tab {
-            border: 1px solid var(--border);
-            background: transparent;
-            color: var(--text-muted);
-            border-radius: 999px;
-            padding: 0.4rem 0.85rem;
-            cursor: pointer;
-            font-weight: 600;
-            font-size: 0.85rem;
-          }
-          .tab.active {
-            background: var(--accent-soft);
-            color: var(--accent);
-            border-color: transparent;
-          }
-        `}</style>
       </div>
     </div>
   )

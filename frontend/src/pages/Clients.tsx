@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { api, type Client, type GroupSummary, type Inbound, type OnlineClients } from '../api'
+import { api, type Client, type GroupSummary, type Inbound, type LimitWarning, type OnlineClients } from '../api'
 import { useApp } from '../AppContext'
 import { ClientBulkAddModal } from '../components/ClientBulkAddModal'
 import { ClientBulkAdjustModal } from '../components/ClientBulkAdjustModal'
@@ -7,18 +7,25 @@ import { ClientBulkAttachModal } from '../components/ClientBulkAttachModal'
 import { ClientBulkDetachModal } from '../components/ClientBulkDetachModal'
 import { ClientFormModal } from '../components/ClientFormModal'
 import { ClientInfoModal } from '../components/ClientInfoModal'
+import { ConfirmModal } from '../components/ConfirmModal'
+import { TrafficBar } from '../components/TrafficBar'
 import { inboundSupportsClients } from '../lib/inboundForm'
+import type { DictKey } from '../i18n'
 
 type ClientRow = Client & { inboundRemark?: string; inboundProtocol?: string; inboundPort?: number; inboundCount?: number }
 
 type StatusFilter = 'all' | 'enabled' | 'disabled' | 'expired' | 'depleted'
 
-const STATUS_CHIPS: { id: StatusFilter; label: string }[] = [
-  { id: 'all', label: 'All' },
-  { id: 'enabled', label: 'Enabled' },
-  { id: 'disabled', label: 'Disabled' },
-  { id: 'expired', label: 'Expired' },
-  { id: 'depleted', label: 'Depleted' },
+type ConfirmState =
+  | { kind: 'delete'; id: number }
+  | { kind: 'kick'; id: number }
+
+const STATUS_CHIPS: { id: StatusFilter; labelKey: DictKey }[] = [
+  { id: 'all', labelKey: 'filterAll' },
+  { id: 'enabled', labelKey: 'filterEnabled' },
+  { id: 'disabled', labelKey: 'filterDisabled' },
+  { id: 'expired', labelKey: 'filterExpired' },
+  { id: 'depleted', labelKey: 'filterDepleted' },
 ]
 
 function isExpired(c: Client) {
@@ -27,6 +34,10 @@ function isExpired(c: Client) {
 
 function isDepleted(c: Client) {
   return (c.totalGB || 0) > 0 && (c.up || 0) + (c.down || 0) >= c.totalGB * 1e9
+}
+
+function usedGB(c: Client) {
+  return ((c.up || 0) + (c.down || 0)) / (1024 * 1024 * 1024)
 }
 
 export function ClientsPage() {
@@ -47,6 +58,8 @@ export function ClientsPage() {
   const [detachOpen, setDetachOpen] = useState(false)
   const [adjustOpen, setAdjustOpen] = useState(false)
   const [onlineMap, setOnlineMap] = useState<Record<string, number>>({})
+  const [limitWarnings, setLimitWarnings] = useState<LimitWarning[]>([])
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null)
 
   async function load() {
     const [ib, g] = await Promise.all([
@@ -64,12 +77,33 @@ export function ClientsPage() {
     } catch { /* ignore */ }
   }
 
+  async function loadLimitWarnings() {
+    try {
+      const data = await api<LimitWarning[]>('/clients/limit-warnings')
+      setLimitWarnings(Array.isArray(data) ? data : [])
+    } catch { /* ignore */ }
+  }
+
   useEffect(() => { load().catch(console.error) }, [])
   useEffect(() => {
     void loadOnlines()
-    const t = setInterval(() => { void loadOnlines() }, 15000)
+    void loadLimitWarnings()
+    const t = setInterval(() => {
+      void loadOnlines()
+      void loadLimitWarnings()
+    }, 15000)
     return () => clearInterval(t)
   }, [])
+
+  const emailToId = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const ib of inbounds) {
+      for (const c of ib.clients || []) {
+        if (c.email && !m.has(c.email)) m.set(c.email, c.id)
+      }
+    }
+    return m
+  }, [inbounds])
 
   const clientInbounds = useMemo(
     () => inbounds.filter((i) => inboundSupportsClients(i.protocol)),
@@ -138,13 +172,18 @@ export function ClientsPage() {
   }, [inbounds, filter, groupFilter, statusFilter])
 
   async function remove(id: number) {
-    if (!confirm('Delete client?')) return
     await api(`/clients/${id}`, { method: 'DELETE' })
     await load()
   }
 
   async function resetTraffic(id: number) {
     await api(`/clients/${id}/reset-traffic`, { method: 'POST' })
+    await load()
+  }
+
+  async function kickClient(id: number) {
+    await api(`/clients/${id}/kick`, { method: 'POST' })
+    await loadLimitWarnings()
     await load()
   }
 
@@ -158,13 +197,6 @@ export function ClientsPage() {
     await load()
   }
 
-  function traffic(c: Client) {
-    const used = ((c.up || 0) + (c.down || 0)) / (1024 * 1024 * 1024)
-    const total = c.totalGB || 0
-    if (total <= 0) return `${used.toFixed(2)} GB / ∞`
-    return `${used.toFixed(2)} / ${total} GB`
-  }
-
   return (
     <div>
       <div className="page-head">
@@ -172,14 +204,14 @@ export function ClientsPage() {
           <h1 className="page-title">{tr('clients')}</h1>
           <p className="page-sub">{tr('clientsHint')}</p>
         </div>
-        <div className="row-actions">
-          <button className="btn secondary" onClick={() => { void bulkAddToGroup() }} disabled={rows.length === 0}>{tr('addToGroup')}</button>
-          <button className="btn secondary" onClick={() => setAttachOpen(true)} disabled={rows.length === 0}>{tr('bulkAttach')}</button>
-          <button className="btn secondary" onClick={() => setDetachOpen(true)} disabled={rows.length === 0}>{tr('bulkDetach')}</button>
-          <button className="btn secondary" onClick={() => setAdjustOpen(true)} disabled={rows.length === 0}>{tr('bulkAdjust')}</button>
-          <button className="btn secondary" onClick={() => setBulkOpen(true)} disabled={clientInbounds.length === 0}>{tr('bulkAdd')}</button>
+        <div className="toolbar">
+          <button className="btn secondary btn-sm" onClick={() => { void bulkAddToGroup() }} disabled={rows.length === 0}>{tr('addToGroup')}</button>
+          <button className="btn secondary btn-sm" onClick={() => setAttachOpen(true)} disabled={rows.length === 0}>{tr('bulkAttach')}</button>
+          <button className="btn secondary btn-sm" onClick={() => setDetachOpen(true)} disabled={rows.length === 0}>{tr('bulkDetach')}</button>
+          <button className="btn secondary btn-sm" onClick={() => setAdjustOpen(true)} disabled={rows.length === 0}>{tr('bulkAdjust')}</button>
+          <button className="btn secondary btn-sm" onClick={() => setBulkOpen(true)} disabled={clientInbounds.length === 0}>{tr('bulkAdd')}</button>
           <button
-            className="btn"
+            className="btn btn-sm"
             onClick={() => setModal({ open: true, mode: 'add', inbound: null, client: null })}
             disabled={clientInbounds.length === 0}
           >
@@ -188,22 +220,51 @@ export function ClientsPage() {
         </div>
       </div>
 
-      <div className="card" style={{ marginBottom: 12, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <input
-          className="input"
-          style={{ flex: 1, minWidth: 200 }}
-          placeholder="Search email / uuid / subId / inbound…"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-        />
-        <select className="select" style={{ width: 200 }} value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)}>
-          <option value="">{tr('filterGroup')}</option>
-          <option value="__none__">(no group)</option>
-          {groupNames.map((g) => (
-            <option key={g} value={g}>{g}</option>
-          ))}
-        </select>
-        <div className="chip-row" style={{ marginTop: 0, width: '100%' }}>
+      {limitWarnings.length > 0 && (
+        <div className="alert danger">
+          <strong>{tr('limitIpWarnings')}</strong>
+          <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
+            {limitWarnings.map((w) => {
+              const id = emailToId.get(w.email)
+              return (
+                <li key={w.email} style={{ marginBottom: 6 }}>
+                  <code>{w.email}</code>: {w.ips.length}/{w.limit} IPs
+                  {' '}({w.ips.join(', ')})
+                  {id ? (
+                    <button
+                      type="button"
+                      className="btn btn-sm secondary"
+                      style={{ marginLeft: 8 }}
+                      onClick={() => setConfirm({ kind: 'kick', id })}
+                    >
+                      {tr('clearIpsWarn')}
+                    </button>
+                  ) : null}
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      )}
+
+      <div className="card" style={{ marginBottom: 12 }}>
+        <div className="toolbar">
+          <input
+            className="input"
+            style={{ flex: 1, minWidth: 200 }}
+            placeholder="Search email / uuid / subId / inbound…"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+          />
+          <select className="select" style={{ width: 200 }} value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)}>
+            <option value="">{tr('filterGroup')}</option>
+            <option value="__none__">(no group)</option>
+            {groupNames.map((g) => (
+              <option key={g} value={g}>{g}</option>
+            ))}
+          </select>
+        </div>
+        <div className="chip-row">
           {STATUS_CHIPS.map((chip) => (
             <button
               key={chip.id}
@@ -211,7 +272,7 @@ export function ClientsPage() {
               className={`chip${statusFilter === chip.id ? ' active' : ''}`}
               onClick={() => setStatusFilter(chip.id)}
             >
-              {chip.label}
+              {tr(chip.labelKey)}
             </button>
           ))}
         </div>
@@ -238,7 +299,13 @@ export function ClientsPage() {
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 && <tr><td colSpan={8}>{tr('empty')}</td></tr>}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={8}>
+                  <div className="empty-state">{tr('empty')}</div>
+                </td>
+              </tr>
+            )}
             {rows.map((c) => (
                 <tr key={c.id}>
                   <td>
@@ -250,29 +317,48 @@ export function ClientsPage() {
                   </td>
                   <td>
                     {c.email}{' '}
-                    {onlineMap[c.email] ? <span className="badge on">{tr('online')}</span> : null}
+                    {onlineMap[c.email] ? <span className="badge online">{tr('online')}</span> : null}
                   </td>
-                  <td>{c.group || '—'}</td>
+                  <td>{c.group ? <span className="tag">{c.group}</span> : '—'}</td>
                   <td>
                     <span className="badge">{c.inboundProtocol}</span>{' '}
                     {c.inboundRemark}:{c.inboundPort}
                     {(c.inboundCount || 1) > 1 && <span className="badge" style={{ marginLeft: 4 }}>+{c.inboundCount! - 1}</span>}
                   </td>
                   <td><code style={{ fontFamily: 'var(--mono)', fontSize: '0.8rem' }}>{c.uuid?.slice(0, 8)}…</code></td>
-                  <td>{traffic(c)}</td>
+                  <td><TrafficBar used={usedGB(c)} totalGB={c.totalGB || 0} /></td>
                   <td><span className={`badge ${c.enable ? 'on' : 'off'}`}>{c.enable ? tr('enable') : tr('disable')}</span></td>
                   <td className="row-actions">
-                    <button className="btn secondary" onClick={() => { setInfoTab('links'); setInfoClient(c) }}>{tr('link')}</button>
-                    <button className="btn secondary" onClick={() => { setInfoTab('sub'); setInfoClient(c) }}>{tr('subscription')}</button>
-                    <button className="btn secondary" onClick={() => { void resetTraffic(c.id) }}>{tr('resetTraffic')}</button>
-                    <button className="btn secondary" onClick={() => setModal({ open: true, mode: 'edit', inbound: null, client: c })}>{tr('edit')}</button>
-                    <button className="btn danger" onClick={() => remove(c.id)}>{tr('delete')}</button>
+                    <button className="btn btn-sm secondary" onClick={() => { setInfoTab('links'); setInfoClient(c) }}>{tr('link')}</button>
+                    <button className="btn btn-sm secondary" onClick={() => { setInfoTab('sub'); setInfoClient(c) }}>{tr('subscription')}</button>
+                    <button className="btn btn-sm secondary" onClick={() => { void resetTraffic(c.id) }}>{tr('resetTraffic')}</button>
+                    {(c.limitIp || 0) > 0 && (
+                      <button className="btn btn-sm secondary" onClick={() => setConfirm({ kind: 'kick', id: c.id })}>{tr('clearIpsWarn')}</button>
+                    )}
+                    <button className="btn btn-sm secondary" onClick={() => setModal({ open: true, mode: 'edit', inbound: null, client: c })}>{tr('edit')}</button>
+                    <button className="btn btn-sm danger" onClick={() => setConfirm({ kind: 'delete', id: c.id })}>{tr('delete')}</button>
                   </td>
                 </tr>
               ))}
           </tbody>
         </table>
       </div>
+
+      <ConfirmModal
+        open={!!confirm}
+        title={confirm?.kind === 'kick' ? tr('clearIpsWarn') : tr('confirmDeleteTitle')}
+        message={confirm?.kind === 'kick' ? `${tr('clearIpsWarn')}?` : tr('confirmDeleteClient')}
+        confirmLabel={confirm?.kind === 'kick' ? tr('clearIpsWarn') : tr('delete')}
+        danger={confirm?.kind === 'delete'}
+        onCancel={() => setConfirm(null)}
+        onConfirm={() => {
+          const c = confirm
+          setConfirm(null)
+          if (!c) return
+          if (c.kind === 'kick') void kickClient(c.id)
+          else void remove(c.id)
+        }}
+      />
 
       <ClientInfoModal
         open={!!infoClient}

@@ -15,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/we1bboard/we1bboard/internal/database"
+	"github.com/we1bboard/we1bboard/internal/database/model"
 	"github.com/we1bboard/we1bboard/internal/panellog"
 	"github.com/we1bboard/we1bboard/internal/security"
 )
@@ -185,5 +186,73 @@ func (a *API) WarpGenerate(c *gin.Context) {
 			"settings":       string(settingsJSON),
 			"streamSettings": "",
 		},
+	})
+}
+
+// WarpApply generates a WARP WireGuard keypair and creates a disabled outbound (tag warp).
+// User only needs to fill address / peer publicKey / reserved from Cloudflare.
+// POST /xray/warp/apply
+func (a *API) WarpApply(c *gin.Context) {
+	if a.Outbound == nil {
+		fail(c, 500, fmt.Errorf("outbound service unavailable"))
+		return
+	}
+	curve := ecdh.X25519()
+	priv, err := curve.GenerateKey(rand.Reader)
+	if err != nil {
+		fail(c, 500, err)
+		return
+	}
+	privateKey := base64.StdEncoding.EncodeToString(priv.Bytes())
+	publicKey := base64.StdEncoding.EncodeToString(priv.PublicKey().Bytes())
+
+	settings := map[string]any{
+		"secretKey": privateKey,
+		"address":   []string{},
+		"peers": []map[string]any{{
+			"publicKey":  "",
+			"endpoint":   "engage.cloudflareclient.com:2408",
+			"allowedIPs": []string{"0.0.0.0/0", "::/0"},
+		}},
+		"reserved": []int{},
+		"mtu":      1280,
+	}
+	settingsJSON, _ := json.MarshalIndent(settings, "", "  ")
+
+	tag := "warp"
+	var existing []model.Outbound
+	_ = database.DB.Select("tag").Find(&existing).Error
+	used := map[string]bool{}
+	for _, o := range existing {
+		used[o.Tag] = true
+	}
+	if used[tag] {
+		for i := 2; ; i++ {
+			cand := fmt.Sprintf("warp-%d", i)
+			if !used[cand] {
+				tag = cand
+				break
+			}
+		}
+	}
+
+	o := &model.Outbound{
+		Tag:            tag,
+		Protocol:       "wireguard",
+		Settings:       string(settingsJSON),
+		StreamSettings: "",
+		Enable:         false,
+		Remark:         "Cloudflare WARP (fill address/reserved)",
+	}
+	if err := a.Outbound.Create(o); err != nil {
+		fail(c, 400, err)
+		return
+	}
+	panellog.Append("warp apply: created outbound tag=%s (disabled)", tag)
+	ok(c, gin.H{
+		"outbound":   o,
+		"privateKey": privateKey,
+		"publicKey":  publicKey,
+		"note":       "Outbound created disabled. Fill address, peers[0].publicKey, and reserved from Cloudflare WARP registration, then enable.",
 	})
 }

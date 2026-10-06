@@ -1,22 +1,44 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { useApp } from './AppContext'
 import { api } from './api'
+import type { DictKey } from './i18n'
 
-const links = [
-  ['/', 'dashboard', '◎'],
-  ['/inbounds', 'inbounds', '⇢'],
-  ['/clients', 'clients', '◉'],
-  ['/groups', 'groups', '▦'],
-  ['/hosts', 'hosts', '⌂'],
-  ['/outbounds', 'outbounds', '⇠'],
-  ['/bridges', 'bridges', '⇄'],
-  ['/nodes', 'nodes', '⬡'],
-  ['/tgproxy', 'tgproxy', '✈'],
-  ['/routing', 'routing', '⎇'],
-  ['/xray', 'xray', '✦'],
-  ['/logs', 'logs', '☰'],
-  ['/settings', 'settings', '⚙'],
-] as const
+type NavItem = readonly [to: string, key: DictKey, icon: string]
+type NavSection = { label: DictKey; items: readonly NavItem[] }
+
+const sections: readonly NavSection[] = [
+  {
+    label: 'navOverview',
+    items: [['/', 'dashboard', '◎']],
+  },
+  {
+    label: 'navTraffic',
+    items: [
+      ['/inbounds', 'inbounds', '↓'],
+      ['/clients', 'clients', '◉'],
+      ['/groups', 'groups', '▦'],
+      ['/hosts', 'hosts', '⌂'],
+    ],
+  },
+  {
+    label: 'navNetwork',
+    items: [
+      ['/outbounds', 'outbounds', '↑'],
+      ['/bridges', 'bridges', '⇄'],
+      ['/nodes', 'nodes', '⬡'],
+      ['/tgproxy', 'tgproxy', '✈'],
+      ['/routing', 'routing', '⎇'],
+      ['/xray', 'xray', '✦'],
+    ],
+  },
+  {
+    label: 'navSystem',
+    items: [
+      ['/logs', 'logs', '☰'],
+      ['/settings', 'settings', '⚙'],
+    ],
+  },
+]
 
 export function Layout() {
   const { tr, setAuthed } = useApp()
@@ -35,11 +57,21 @@ export function Layout() {
           </div>
         </div>
         <nav className="nav-list">
-          {links.map(([to, key, icon]) => (
-            <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => (isActive ? 'nav active' : 'nav')}>
-              <span className="nav-ico" aria-hidden>{icon}</span>
-              <span>{tr(key)}</span>
-            </NavLink>
+          {sections.map((section) => (
+            <div key={section.label} className="nav-section">
+              <div className="section-title nav-section-title">{tr(section.label)}</div>
+              {section.items.map(([to, key, icon]) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  end={to === '/'}
+                  className={({ isActive }) => (isActive ? 'nav active' : 'nav')}
+                >
+                  <span className="nav-ico" aria-hidden>{icon}</span>
+                  <span>{tr(key)}</span>
+                </NavLink>
+              ))}
+            </div>
           ))}
         </nav>
         <button className="btn ghost logout" onClick={logout}>
@@ -66,20 +98,21 @@ export function Layout() {
           background: var(--bg-sidebar);
           border-right: 1px solid var(--border);
           backdrop-filter: blur(18px);
+          overflow: auto;
         }
         .brand-block {
           display: flex;
           gap: 0.75rem;
           align-items: center;
-          margin: 0.15rem 0.45rem 1.25rem;
+          margin: 0.15rem 0.45rem 1rem;
         }
         .brand-mark {
           width: 36px; height: 36px; border-radius: 11px;
           background:
-            linear-gradient(135deg, var(--accent), transparent 60%),
-            linear-gradient(225deg, rgba(14,165,233,.55), transparent 55%);
+            linear-gradient(145deg, var(--accent), transparent 62%),
+            linear-gradient(225deg, rgba(14,165,233,.45), transparent 55%);
           border: 1px solid var(--border);
-          box-shadow: 0 0 24px var(--glow);
+          box-shadow: 0 0 20px var(--glow);
         }
         .brand {
           font-size: 1.2rem;
@@ -94,16 +127,23 @@ export function Layout() {
           text-transform: uppercase;
           margin-top: 2px;
         }
-        .nav-list { display: flex; flex-direction: column; gap: 0.2rem; }
+        .nav-list { display: flex; flex-direction: column; gap: 0.15rem; flex: 1; }
+        .nav-section { display: flex; flex-direction: column; gap: 0.15rem; }
+        .nav-section-title {
+          margin: 0.9rem 0.7rem 0.3rem;
+          font-size: 0.68rem;
+        }
+        .nav-section:first-child .nav-section-title { margin-top: 0.15rem; }
         .nav {
           display: flex;
           align-items: center;
           gap: 0.65rem;
-          padding: 0.62rem 0.75rem;
-          border-radius: 12px;
+          padding: 0.55rem 0.75rem;
+          border-radius: 10px;
           color: var(--text-muted);
           font-weight: 600;
-          transition: background .15s, color .15s, transform .15s;
+          font-size: 0.92rem;
+          transition: background .15s, color .15s;
         }
         .nav:hover { background: var(--accent-soft); color: var(--text); }
         .nav.active {
@@ -114,8 +154,9 @@ export function Layout() {
         .nav-ico {
           width: 1.25rem;
           text-align: center;
-          opacity: 0.85;
-          font-size: 0.95rem;
+          opacity: 0.8;
+          font-size: 0.9rem;
+          font-family: var(--mono);
         }
         .logout { margin-top: auto; width: 100%; }
         .content {
@@ -129,9 +170,15 @@ export function Layout() {
             height: auto;
             border-right: none;
             border-bottom: 1px solid var(--border);
+            overflow: visible;
           }
-          .nav-list { flex-direction: row; flex-wrap: wrap; }
-          .nav { padding: 0.5rem 0.7rem; }
+          .nav-list { flex-direction: row; flex-wrap: wrap; gap: 0.35rem; }
+          .nav-section { flex-direction: row; flex-wrap: wrap; gap: 0.2rem; align-items: center; }
+          .nav-section-title {
+            width: 100%;
+            margin: 0.5rem 0.35rem 0.15rem;
+          }
+          .nav { padding: 0.45rem 0.65rem; }
           .logout { margin-top: 0.75rem; width: auto; }
           .content { padding: 1.1rem 1rem 2rem; }
         }

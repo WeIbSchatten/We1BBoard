@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { api, type Bridge } from '../api'
 import { useApp } from '../AppContext'
+import { ConfirmModal } from '../components/ConfirmModal'
 
 const PROTOCOLS = ['vless', 'vmess', 'trojan', 'shadowsocks', 'socks', 'http', 'wireguard'] as const
 const NETWORKS = ['tcp', 'ws', 'grpc', 'httpupgrade', 'xhttp', 'kcp'] as const
@@ -52,6 +53,7 @@ export function BridgesPage() {
   const [open, setOpen] = useState(false)
   const [hint, setHint] = useState('')
   const [advanced, setAdvanced] = useState(false)
+  const [confirmId, setConfirmId] = useState<number | null>(null)
 
   async function load() {
     setRows(await api<Bridge[]>('/bridges'))
@@ -67,7 +69,6 @@ export function BridgesPage() {
   }
 
   async function remove(id: number) {
-    if (!confirm('Delete bridge?')) return
     await api(`/bridges/${id}`, { method: 'DELETE' })
     await load()
   }
@@ -81,7 +82,7 @@ export function BridgesPage() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div className="page-head">
         <div>
           <h1 className="page-title">{tr('bridges')}</h1>
           <p className="page-sub">Мост entry→exit на любом outbound-протоколе Xray (VLESS / VMess / Trojan / SS / …)</p>
@@ -110,8 +111,8 @@ export function BridgesPage() {
                 <td>{b.outboundTag}</td>
                 <td>{b.routingInbound || '—'}</td>
                 <td className="row-actions">
-                  <button className="btn secondary" onClick={() => showHint(b.id)}>Hint</button>
-                  <button className="btn danger" onClick={() => remove(b.id)}>{tr('delete')}</button>
+                  <button className="btn btn-sm secondary" onClick={() => showHint(b.id)}>Hint</button>
+                  <button className="btn btn-sm danger" onClick={() => setConfirmId(b.id)}>{tr('delete')}</button>
                 </td>
               </tr>
             ))}
@@ -240,13 +241,26 @@ export function BridgesPage() {
               </>
             )}
 
-            <div className="row-actions" style={{ marginTop: 12 }}>
-              <button className="btn" type="submit">{tr('save')}</button>
-              <button className="btn secondary" type="button" onClick={() => setOpen(false)}>Cancel</button>
+            <div className="modal-footer">
+              <button className="btn secondary btn-sm" type="button" onClick={() => setOpen(false)}>{tr('cancel')}</button>
+              <button className="btn btn-sm" type="submit">{tr('save')}</button>
             </div>
           </form>
         </div>
       )}
+
+      <ConfirmModal
+        open={confirmId != null}
+        title={tr('confirmDeleteTitle')}
+        message={tr('confirmDeleteBridge')}
+        danger
+        onCancel={() => setConfirmId(null)}
+        onConfirm={() => {
+          const id = confirmId
+          setConfirmId(null)
+          if (id != null) void remove(id)
+        }}
+      />
     </div>
   )
 }

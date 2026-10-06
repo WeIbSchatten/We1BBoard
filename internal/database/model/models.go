@@ -70,12 +70,13 @@ type Client struct {
 	LimitHWID  int       `json:"limitHwid"`
 	TotalGB    int64     `json:"totalGB"`
 	ExpiryTime int64     `json:"expiryTime"`
-	TrafficReset string  `gorm:"size:32;default:never" json:"trafficReset"` // never|daily|weekly|monthly
-	ExtraLinks string    `gorm:"type:text" json:"extraLinks"`              // newline-separated share links
-	Up         int64     `json:"up"`
-	Down       int64     `json:"down"`
-	TgID       int64     `json:"tgId"`
-	Comment    string    `gorm:"size:512" json:"comment"`
+	TrafficReset     string `gorm:"size:32;default:never" json:"trafficReset"` // never|daily|weekly|monthly
+	LastTrafficReset int64  `json:"lastTrafficReset"`                          // unix ms of last auto/manual period reset
+	ExtraLinks       string `gorm:"type:text" json:"extraLinks"`               // newline-separated share links
+	Up               int64  `json:"up"`
+	Down             int64  `json:"down"`
+	TgID             int64  `json:"tgId"`
+	Comment          string `gorm:"size:512" json:"comment"`
 	CreatedAt  time.Time `json:"createdAt"`
 	UpdatedAt  time.Time `json:"updatedAt"`
 }

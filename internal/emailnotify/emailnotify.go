@@ -97,6 +97,15 @@ func NotifyLogin(username, ip string) {
 	_ = Send(to, "We1BBoard login", body)
 }
 
+// NotifyTraffic sends a traffic alert when emailNotifyTraffic is enabled.
+func NotifyTraffic(text string) {
+	if !Enabled() || !tgnotify.SettingTruthy(database.GetSetting("emailNotifyTraffic")) {
+		return
+	}
+	to := strings.TrimSpace(database.GetSetting("smtpFrom"))
+	_ = Send(to, "We1BBoard traffic", text)
+}
+
 // Test sends a test email using current SMTP settings.
 func Test() error {
 	if !ValidSMTPHost(database.GetSetting("smtpHost")) {

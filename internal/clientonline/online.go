@@ -25,7 +25,17 @@ const RecentIPWindow = 2 * time.Minute
 var (
 	mu       sync.RWMutex
 	lastSeen = map[string]int64{} // email -> unix ms
+
+	warnMu        sync.RWMutex
+	limitWarnings = map[string]LimitWarning{} // email -> warning
 )
+
+// LimitWarning is an in-memory LimitIP excess alert for the panel UI.
+type LimitWarning struct {
+	Email string   `json:"email"`
+	IPs   []string `json:"ips"`
+	Limit int      `json:"limit"`
+}
 
 // Touch records activity for email at unixMs (or now if unixMs <= 0).
 func Touch(email string, unixMs int64) {
@@ -178,14 +188,57 @@ func warnLimitIP(emails map[string]bool) {
 	for _, c := range clients {
 		var ips []model.ClientIP
 		_ = database.DB.Where("email = ? AND last_seen >= ?", c.Email, cutoff).Find(&ips).Error
-		uniq := map[string]bool{}
+		uniq := make([]string, 0, len(ips))
+		seen := map[string]bool{}
 		for _, row := range ips {
-			uniq[row.IP] = true
+			if seen[row.IP] {
+				continue
+			}
+			seen[row.IP] = true
+			uniq = append(uniq, row.IP)
 		}
 		if len(uniq) > c.LimitIP {
-			panellog.Append("LimitIP warning: email=%s ips=%d limit=%d (kick skipped)", c.Email, len(uniq), c.LimitIP)
+			SetLimitWarning(c.Email, uniq, c.LimitIP)
+			panellog.Append("LimitIP warning: email=%s ips=%d limit=%d", c.Email, len(uniq), c.LimitIP)
+		} else {
+			ClearLimitWarning(c.Email)
 		}
 	}
+}
+
+// SetLimitWarning stores an in-memory LimitIP alert for email.
+func SetLimitWarning(email string, ips []string, limit int) {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return
+	}
+	warnMu.Lock()
+	limitWarnings[email] = LimitWarning{Email: email, IPs: append([]string(nil), ips...), Limit: limit}
+	warnMu.Unlock()
+}
+
+// ClearLimitWarning removes the in-memory LimitIP alert for email.
+func ClearLimitWarning(email string) {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return
+	}
+	warnMu.Lock()
+	delete(limitWarnings, email)
+	warnMu.Unlock()
+}
+
+// ListLimitWarnings returns current LimitIP excess alerts.
+func ListLimitWarnings() []LimitWarning {
+	warnMu.RLock()
+	defer warnMu.RUnlock()
+	out := make([]LimitWarning, 0, len(limitWarnings))
+	for _, w := range limitWarnings {
+		cp := w
+		cp.IPs = append([]string(nil), w.IPs...)
+		out = append(out, cp)
+	}
+	return out
 }
 
 // ListIPs returns stored IPs for email ordered by lastSeen desc.

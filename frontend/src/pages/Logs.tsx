@@ -188,7 +188,7 @@ export function LogsPage() {
         <p className="page-sub" style={{ marginTop: 0 }}>{tr('noConfigIssues')}</p>
       )}
 
-      <div className="tabs" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+      <div className="tabs">
         {tabs.map((t) => (
           <button
             key={t.id}
@@ -244,21 +244,6 @@ export function LogsPage() {
       {msg && <p className="page-sub" style={{ marginTop: 10 }}>{msg}</p>}
 
       <style>{`
-        .tab {
-          border: 1px solid var(--border);
-          background: transparent;
-          color: var(--text-muted);
-          border-radius: 999px;
-          padding: 0.4rem 0.85rem;
-          cursor: pointer;
-          font-weight: 600;
-          font-size: 0.85rem;
-        }
-        .tab.active {
-          background: var(--accent-soft);
-          color: var(--accent);
-          border-color: transparent;
-        }
         .log-view {
           margin: 0;
           padding: 1rem 1.1rem;
@@ -268,7 +253,7 @@ export function LogsPage() {
           border: 1px solid var(--border);
           border-radius: 14px;
           background: color-mix(in srgb, var(--bg-sidebar) 85%, transparent);
-          font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+          font-family: var(--mono), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
           font-size: 0.78rem;
           line-height: 1.45;
           white-space: pre-wrap;

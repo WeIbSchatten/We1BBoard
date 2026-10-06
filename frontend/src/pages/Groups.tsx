@@ -1,6 +1,11 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { api, type Client, type GroupSummary, type Inbound } from '../api'
 import { useApp } from '../AppContext'
+import { ConfirmModal } from '../components/ConfirmModal'
+
+type ConfirmState =
+  | { kind: 'delete'; name: string }
+  | { kind: 'reset'; name: string }
 
 export function GroupsPage() {
   const { tr } = useApp()
@@ -9,6 +14,7 @@ export function GroupsPage() {
   const [assignOpen, setAssignOpen] = useState(false)
   const [assignName, setAssignName] = useState('')
   const [selected, setSelected] = useState<number[]>([])
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null)
 
   async function load() {
     const [g, ib] = await Promise.all([
@@ -46,13 +52,11 @@ export function GroupsPage() {
   }
 
   async function deleteGroup(name: string) {
-    if (!confirm(`${tr('delete')} "${name}"?`)) return
     await api(`/clients/groups/${encodeURIComponent(name)}`, { method: 'DELETE' })
     await load()
   }
 
   async function resetTraffic(name: string) {
-    if (!confirm(`${tr('resetTraffic')} — ${name}?`)) return
     await api('/clients/groups/reset-traffic', { method: 'POST', body: JSON.stringify({ name }) })
     await load()
   }
@@ -109,10 +113,10 @@ export function GroupsPage() {
                 <td>{(g.up / (1024 * 1024 * 1024)).toFixed(2)} GB</td>
                 <td>{(g.down / (1024 * 1024 * 1024)).toFixed(2)} GB</td>
                 <td className="row-actions">
-                  <button className="btn secondary" onClick={() => openAssign(g.name)}>{tr('assignClients')}</button>
-                  <button className="btn secondary" onClick={() => { void renameGroup(g.name) }}>{tr('rename')}</button>
-                  <button className="btn secondary" onClick={() => { void resetTraffic(g.name) }}>{tr('resetTraffic')}</button>
-                  <button className="btn danger" onClick={() => { void deleteGroup(g.name) }}>{tr('delete')}</button>
+                  <button className="btn btn-sm secondary" onClick={() => openAssign(g.name)}>{tr('assignClients')}</button>
+                  <button className="btn btn-sm secondary" onClick={() => { void renameGroup(g.name) }}>{tr('rename')}</button>
+                  <button className="btn btn-sm secondary" onClick={() => setConfirm({ kind: 'reset', name: g.name })}>{tr('resetTraffic')}</button>
+                  <button className="btn btn-sm danger" onClick={() => setConfirm({ kind: 'delete', name: g.name })}>{tr('delete')}</button>
                 </td>
               </tr>
             ))}
@@ -133,9 +137,9 @@ export function GroupsPage() {
                 />{' '}
                 {tr('clients')} ({selected.length}/{clients.length})
               </label>
-              <div style={{ maxHeight: 280, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8, padding: 8 }}>
+              <div className="check-list" style={{ maxHeight: 280 }}>
                 {clients.map((c) => (
-                  <label key={c.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '4px 0', cursor: 'pointer' }}>
+                  <label key={c.id} style={{ display: 'flex', gap: 8, alignItems: 'center', cursor: 'pointer' }}>
                     <input
                       type="checkbox"
                       checked={selected.includes(c.id)}
@@ -149,13 +153,33 @@ export function GroupsPage() {
                 ))}
               </div>
             </div>
-            <div className="row-actions">
-              <button className="btn" type="submit">{tr('save')}</button>
-              <button className="btn secondary" type="button" onClick={() => setAssignOpen(false)}>{tr('cancel')}</button>
+            <div className="modal-footer">
+              <button className="btn secondary btn-sm" type="button" onClick={() => setAssignOpen(false)}>{tr('cancel')}</button>
+              <button className="btn btn-sm" type="submit">{tr('save')}</button>
             </div>
           </form>
         </div>
       )}
+
+      <ConfirmModal
+        open={!!confirm}
+        title={confirm?.kind === 'reset' ? tr('confirmResetTitle') : tr('confirmDeleteTitle')}
+        message={
+          confirm?.kind === 'reset'
+            ? `${tr('confirmResetGroup')} «${confirm.name}»`
+            : `${tr('confirmDeleteGroup')} «${confirm?.name || ''}»`
+        }
+        confirmLabel={confirm?.kind === 'reset' ? tr('resetTraffic') : tr('delete')}
+        danger={confirm?.kind === 'delete'}
+        onCancel={() => setConfirm(null)}
+        onConfirm={() => {
+          const c = confirm
+          setConfirm(null)
+          if (!c) return
+          if (c.kind === 'delete') void deleteGroup(c.name)
+          else void resetTraffic(c.name)
+        }}
+      />
     </div>
   )
 }

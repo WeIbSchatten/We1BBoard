@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/we1bboard/we1bboard/internal/database"
 	"github.com/we1bboard/we1bboard/internal/database/model"
@@ -182,6 +183,10 @@ func (s *ClientService) ResetGroupTraffic(name string) (int64, error) {
 	if name == "" {
 		return 0, fmt.Errorf("name required")
 	}
-	res := database.DB.Model(&model.Client{}).Where("group_name = ?", name).Updates(map[string]any{"up": 0, "down": 0})
+	res := database.DB.Model(&model.Client{}).Where("group_name = ?", name).Updates(map[string]any{
+		"up":                 0,
+		"down":               0,
+		"last_traffic_reset": time.Now().UnixMilli(),
+	})
 	return res.RowsAffected, res.Error
 }

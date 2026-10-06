@@ -177,7 +177,7 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, groupNa
     <div className="modal-backdrop" onClick={onClose}>
       <form className="modal" style={{ width: 'min(640px, 100%)' }} onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         <h3>{mode === 'edit' ? tr('edit') : tr('create')} {tr('clients')}</h3>
-        <div className="tabs" style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+        <div className="tabs">
           <button type="button" className={`tab ${tab === 'basic' ? 'active' : ''}`} onClick={() => setTab('basic')}>{tr('tabGeneral')}</button>
           <button type="button" className={`tab ${tab === 'config' ? 'active' : ''}`} onClick={() => setTab('config')}>{tr('tabConfig')}</button>
           <button type="button" className={`tab ${tab === 'links' ? 'active' : ''}`} onClick={() => setTab('links')}>Links</button>
@@ -330,21 +330,6 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, groupNa
         </div>
       </form>
       <style>{`
-        .tab {
-          border: 1px solid var(--border);
-          background: transparent;
-          color: var(--text-muted);
-          border-radius: 999px;
-          padding: 0.4rem 0.85rem;
-          cursor: pointer;
-          font-weight: 600;
-          font-size: 0.85rem;
-        }
-        .tab.active {
-          background: var(--accent-soft);
-          color: var(--accent);
-          border-color: transparent;
-        }
         .hint { color: var(--text-muted); font-weight: 400; font-size: 0.8em; }
       `}</style>
     </div>

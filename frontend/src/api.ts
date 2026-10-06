@@ -62,6 +62,12 @@ export type OnlineClients = {
   map: Record<string, number>
 }
 
+export type LimitWarning = {
+  email: string
+  ips: string[]
+  limit: number
+}
+
 export type ClientIPRow = {
   ip: string
   lastSeen: number

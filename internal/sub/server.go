@@ -980,7 +980,7 @@ func ValidateSettings(key, value string) error {
 			return fmt.Errorf("invalid subEnable")
 		}
 	case "subJsonEnable", "subClashEnable", "tgBotEnable", "tgNotifyLogin", "tgNotifyTraffic", "twoFactorEnable",
-		"emailEnable", "emailNotifyLogin", "discordEnable", "discordNotifyLogin":
+		"emailEnable", "emailNotifyLogin", "emailNotifyTraffic", "discordEnable", "discordNotifyLogin", "discordNotifyTraffic":
 		v := strings.ToLower(strings.TrimSpace(value))
 		switch v {
 		case "true", "false", "1", "0", "yes", "no", "on", "off", "":

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { useApp } from '../AppContext'
+import { ConfirmModal } from '../components/ConfirmModal'
 
 type SubInfo = {
   enable: boolean
@@ -26,6 +27,44 @@ type SubBalancer = {
   remark: string
 }
 
+const LABELS: Record<string, string> = {
+  panelPort: 'Panel port',
+  panelPath: 'Panel path',
+  webListen: 'Listen address',
+  certFile: 'TLS certificate',
+  keyFile: 'TLS private key',
+  subEnable: 'Enable subscriptions',
+  subPort: 'Subscription port',
+  subPath: 'Subscription path',
+  subHost: 'Subscription host',
+  subTitle: 'Subscription title',
+  subSupportUrl: 'Support URL',
+  subThemeDir: 'Custom theme directory',
+  subAnnounce: 'Announcement',
+  subJsonEnable: 'JSON subscription format',
+  subClashEnable: 'Clash subscription format',
+  ufwEnable: 'Auto-open UFW ports',
+  tgBotEnable: 'Enable Telegram bot',
+  tgBotToken: 'Telegram bot token',
+  tgBotChatId: 'Telegram chat ID',
+  tgNotifyLogin: 'Notify on login',
+  tgNotifyTraffic: 'Notify on traffic',
+  emailEnable: 'Enable email',
+  smtpHost: 'SMTP host',
+  smtpPort: 'SMTP port',
+  smtpUser: 'SMTP user',
+  smtpPass: 'SMTP password',
+  smtpFrom: 'From address',
+  emailNotifyLogin: 'Notify on login',
+  discordEnable: 'Enable Discord',
+  discordWebhook: 'Discord webhook URL',
+  discordNotifyLogin: 'Notify on login',
+}
+
+function label(key: string) {
+  return LABELS[key] || key
+}
+
 function truthy(v: string | undefined) {
   return v === 'true' || v === '1' || v === 'yes' || v === 'on'
 }
@@ -44,6 +83,7 @@ export function SettingsPage() {
   const [discordBusy, setDiscordBusy] = useState(false)
   const [balancers, setBalancers] = useState<SubBalancer[]>([])
   const [balForm, setBalForm] = useState({ name: '', strategy: 'url-test', selector: '', enable: true, remark: '' })
+  const [confirmBalId, setConfirmBalId] = useState<number | null>(null)
 
   useEffect(() => {
     api<Record<string, string>>('/settings').then((s) => {
@@ -193,7 +233,6 @@ export function SettingsPage() {
   }
 
   async function deleteBalancer(id: number) {
-    if (!confirm('Delete sub balancer?')) return
     await api(`/sub-balancers/${id}`, { method: 'DELETE' })
     await loadBalancers()
   }
@@ -203,11 +242,17 @@ export function SettingsPage() {
 
   return (
     <div>
-      <h1 className="page-title">{tr('settings')}</h1>
-      <p className="page-sub">Тема, акцент, панель, подписки</p>
+      <div className="page-head">
+        <div>
+          <h1 className="page-title">{tr('settings')}</h1>
+          <p className="page-sub">Theme, panel, subscriptions, and notifications</p>
+        </div>
+      </div>
+      {msg && <div className="alert success">{msg}</div>}
 
       <div className="grid2">
         <div className="card">
+          <div className="section-title" style={{ marginTop: 0 }}>Appearance</div>
           <div className="field">
             <label className="label">{tr('theme')}</label>
             <select className="select" value={theme} onChange={(e) => setTheme(e.target.value as typeof theme)}>
@@ -233,85 +278,73 @@ export function SettingsPage() {
         </div>
 
         <div className="card">
+          <div className="section-title" style={{ marginTop: 0 }}>Panel</div>
           {(['panelPort', 'panelPath', 'webListen', 'certFile', 'keyFile'] as const).map((k) => (
             <div className="field" key={k}>
-              <label className="label">{k}</label>
+              <label className="label">{label(k)}</label>
               <input className="input" value={settings[k] || ''} onChange={(e) => setSettings({ ...settings, [k]: e.target.value })} />
             </div>
           ))}
-          <p className="page-sub">certFile / keyFile — пути к TLS сертификату панели. Для Let’s Encrypt используйте install.sh (пункт SSL): acme.sh продлевает и делает restart.</p>
+          <p className="page-sub">TLS paths for the panel. For Let’s Encrypt use install.sh (SSL) — acme.sh renews and restarts.</p>
           <button className="btn" onClick={save}>{tr('save')}</button>
-          {msg && <p className="page-sub">{msg}</p>}
         </div>
       </div>
 
       <div className="card" style={{ marginTop: 12 }}>
-        <h3 style={{ marginTop: 0 }}>{tr('subscription')}</h3>
-        <p className="page-sub">Отдельный listener на subPort (как 3x-ui). UA auto: base64 / Clash / sing-box. Subscription-Userinfo + фильтр expiry/traffic. В проде задайте certFile/keyFile — иначе подписка отдаётся по HTTP (учётки в открытом виде).</p>
+        <div className="section-title" style={{ marginTop: 0 }}>{tr('subscription')}</div>
+        <p className="page-sub">Separate listener on subscription port (3x-ui style). UA auto: base64 / Clash / sing-box.</p>
         <div className="field">
-          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8, textTransform: 'none', letterSpacing: 0 }}>
             <input
               type="checkbox"
               checked={subEnabled}
               onChange={(e) => setSettings({ ...settings, subEnable: e.target.checked ? 'true' : 'false' })}
             />
-            subEnable
+            {label('subEnable')}
           </label>
         </div>
+        <div className="section-title">Endpoints</div>
         {(['subPort', 'subPath', 'subHost', 'subTitle', 'subSupportUrl', 'subThemeDir', 'subAnnounce'] as const).map((k) => (
           <div className="field" key={k}>
-            <label className="label">{k}</label>
+            <label className="label">{label(k)}</label>
             <input className="input" value={settings[k] || ''} onChange={(e) => setSettings({ ...settings, [k]: e.target.value })} placeholder={k === 'subThemeDir' ? '/etc/we1bboard/sub_templates/my-theme' : undefined} />
           </div>
         ))}
-        <div className="field">
-          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <input
-              type="checkbox"
-              checked={truthy(settings.subJsonEnable ?? 'true')}
-              onChange={(e) => setSettings({ ...settings, subJsonEnable: e.target.checked ? 'true' : 'false' })}
-            />
-            subJsonEnable — JSON subscription format
-          </label>
-        </div>
-        <div className="field">
-          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <input
-              type="checkbox"
-              checked={truthy(settings.subClashEnable ?? 'true')}
-              onChange={(e) => setSettings({ ...settings, subClashEnable: e.target.checked ? 'true' : 'false' })}
-            />
-            subClashEnable — Clash subscription format
-          </label>
-        </div>
-        <div className="field">
-          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <input
-              type="checkbox"
-              checked={truthy(settings.ufwEnable ?? 'true')}
-              onChange={(e) => setSettings({ ...settings, ufwEnable: e.target.checked ? 'true' : 'false' })}
-            />
-            ufwEnable — auto-open ports in UFW (panel / sub / inbounds)
-          </label>
-        </div>
-        <p className="page-sub">В браузере URL подписки открывает HTML-страницу (копирование ссылок + QR). VPN-клиенты получают raw. Полная страница с конфигами: <code>?html=1</code>. Кастомный шаблон: абсолютный путь к папке с <code>sub.html</code> или <code>index.html</code> (как 3x-ui).</p>
+        <div className="section-title">Formats & firewall</div>
+        {([
+          ['subJsonEnable', true],
+          ['subClashEnable', true],
+          ['ufwEnable', true],
+        ] as const).map(([k, def]) => (
+          <div className="field" key={k}>
+            <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8, textTransform: 'none', letterSpacing: 0 }}>
+              <input
+                type="checkbox"
+                checked={truthy(settings[k] ?? (def ? 'true' : 'false'))}
+                onChange={(e) => setSettings({ ...settings, [k]: e.target.checked ? 'true' : 'false' })}
+              />
+              {label(k)}
+            </label>
+          </div>
+        ))}
+        <p className="page-sub">Browsers get an HTML page; VPN clients get raw. Full page: <code>?html=1</code>. Custom theme: folder with <code>sub.html</code> or <code>index.html</code>.</p>
         {subInfo && (
           <div className="field">
             <label className="label">Base URL</label>
             <input className="input" readOnly value={subInfo.baseUrl + '{subId}'} />
-            <p className="page-sub">Форматы: {subInfo.formats.join(', ')} · порт {subInfo.subPort || '2096'}</p>
+            <p className="page-sub">Formats: {subInfo.formats.join(', ')} · port {subInfo.subPort || '2096'}</p>
           </div>
         )}
         <button className="btn" onClick={save}>{tr('save')}</button>
       </div>
 
       <div className="card" style={{ marginTop: 12 }}>
-        <h3 style={{ marginTop: 0 }}>Two-factor (TOTP)</h3>
+        <div className="section-title" style={{ marginTop: 0 }}>Two-factor (TOTP)</div>
         <p className="page-sub">Status: {twoFAOn ? 'enabled' : 'disabled'}</p>
         {!twoFAOn && (
           <>
-            <div className="row-actions" style={{ marginBottom: 8 }}>
-              <button className="btn secondary" type="button" onClick={() => { void setup2FA() }}>Setup / QR</button>
+            <div className="toolbar" style={{ marginBottom: 8 }}>
+              <button className="btn secondary btn-sm" type="button" onClick={() => { void setup2FA() }}>Setup / QR</button>
             </div>
             {twoFA && (
               <>
@@ -343,26 +376,26 @@ export function SettingsPage() {
               <label className="label">Password (optional)</label>
               <input className="input" type="password" value={disablePw} onChange={(e) => setDisablePw(e.target.value)} />
             </div>
-            <button className="btn danger" type="button" onClick={() => { void disable2FA() }}>Disable 2FA</button>
+            <button className="btn danger btn-sm" type="button" onClick={() => { void disable2FA() }}>Disable 2FA</button>
           </>
         )}
       </div>
 
       <div className="card" style={{ marginTop: 12 }}>
-        <h3 style={{ marginTop: 0 }}>Telegram notify</h3>
+        <div className="section-title" style={{ marginTop: 0 }}>Telegram notify</div>
         <p className="page-sub">Panel bot (not TgProxy). Login alerts via api.telegram.org.</p>
         <div className="field">
-          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8, textTransform: 'none', letterSpacing: 0 }}>
             <input
               type="checkbox"
               checked={truthy(settings.tgBotEnable)}
               onChange={(e) => setSettings({ ...settings, tgBotEnable: e.target.checked ? 'true' : 'false' })}
             />
-            tgBotEnable
+            {label('tgBotEnable')}
           </label>
         </div>
         <div className="field">
-          <label className="label">tgBotToken</label>
+          <label className="label">{label('tgBotToken')}</label>
           <input
             className="input"
             value={settings.tgBotToken || ''}
@@ -371,7 +404,7 @@ export function SettingsPage() {
           />
         </div>
         <div className="field">
-          <label className="label">tgBotChatId</label>
+          <label className="label">{label('tgBotChatId')}</label>
           <input
             className="input"
             value={settings.tgBotChatId || ''}
@@ -380,101 +413,102 @@ export function SettingsPage() {
           />
         </div>
         <div className="field">
-          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8, textTransform: 'none', letterSpacing: 0 }}>
             <input
               type="checkbox"
               checked={truthy(settings.tgNotifyLogin)}
               onChange={(e) => setSettings({ ...settings, tgNotifyLogin: e.target.checked ? 'true' : 'false' })}
             />
-            tgNotifyLogin
+            {label('tgNotifyLogin')}
           </label>
         </div>
         <div className="field">
-          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8, textTransform: 'none', letterSpacing: 0 }}>
             <input
               type="checkbox"
               checked={truthy(settings.tgNotifyTraffic)}
               onChange={(e) => setSettings({ ...settings, tgNotifyTraffic: e.target.checked ? 'true' : 'false' })}
             />
-            tgNotifyTraffic
+            {label('tgNotifyTraffic')}
           </label>
         </div>
-        <div className="row-actions">
+        <div className="toolbar">
           <button className="btn" type="button" onClick={save}>{tr('save')}</button>
-          <button className="btn secondary" type="button" disabled={tgBusy} onClick={() => { void testTelegram() }}>
+          <button className="btn secondary btn-sm" type="button" disabled={tgBusy} onClick={() => { void testTelegram() }}>
             {tgBusy ? '…' : 'Test Telegram'}
           </button>
         </div>
       </div>
 
       <div className="card" style={{ marginTop: 12 }}>
-        <h3 style={{ marginTop: 0 }}>Email notify</h3>
+        <div className="section-title" style={{ marginTop: 0 }}>Email notify</div>
         <p className="page-sub">SMTP login alerts via net/smtp.</p>
         <div className="field">
-          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8, textTransform: 'none', letterSpacing: 0 }}>
             <input
               type="checkbox"
               checked={truthy(settings.emailEnable)}
               onChange={(e) => setSettings({ ...settings, emailEnable: e.target.checked ? 'true' : 'false' })}
             />
-            emailEnable
+            {label('emailEnable')}
           </label>
         </div>
+        <div className="section-title">SMTP</div>
         <div className="grid2">
           <div className="field">
-            <label className="label">smtpHost</label>
+            <label className="label">{label('smtpHost')}</label>
             <input className="input" value={settings.smtpHost || ''} onChange={(e) => setSettings({ ...settings, smtpHost: e.target.value })} placeholder="smtp.example.com" />
           </div>
           <div className="field">
-            <label className="label">smtpPort</label>
+            <label className="label">{label('smtpPort')}</label>
             <input className="input" value={settings.smtpPort || '587'} onChange={(e) => setSettings({ ...settings, smtpPort: e.target.value })} />
           </div>
           <div className="field">
-            <label className="label">smtpUser</label>
+            <label className="label">{label('smtpUser')}</label>
             <input className="input" value={settings.smtpUser || ''} onChange={(e) => setSettings({ ...settings, smtpUser: e.target.value })} />
           </div>
           <div className="field">
-            <label className="label">smtpPass</label>
+            <label className="label">{label('smtpPass')}</label>
             <input className="input" type="password" value={settings.smtpPass || ''} onChange={(e) => setSettings({ ...settings, smtpPass: e.target.value })} placeholder="***" />
           </div>
           <div className="field" style={{ gridColumn: '1 / -1' }}>
-            <label className="label">smtpFrom</label>
+            <label className="label">{label('smtpFrom')}</label>
             <input className="input" value={settings.smtpFrom || ''} onChange={(e) => setSettings({ ...settings, smtpFrom: e.target.value })} placeholder="panel@example.com" />
           </div>
         </div>
         <div className="field">
-          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8, textTransform: 'none', letterSpacing: 0 }}>
             <input
               type="checkbox"
               checked={truthy(settings.emailNotifyLogin)}
               onChange={(e) => setSettings({ ...settings, emailNotifyLogin: e.target.checked ? 'true' : 'false' })}
             />
-            emailNotifyLogin
+            {label('emailNotifyLogin')}
           </label>
         </div>
-        <div className="row-actions">
+        <div className="toolbar">
           <button className="btn" type="button" onClick={save}>{tr('save')}</button>
-          <button className="btn secondary" type="button" disabled={emailBusy} onClick={() => { void testEmail() }}>
+          <button className="btn secondary btn-sm" type="button" disabled={emailBusy} onClick={() => { void testEmail() }}>
             {emailBusy ? '…' : 'Test Email'}
           </button>
         </div>
       </div>
 
       <div className="card" style={{ marginTop: 12 }}>
-        <h3 style={{ marginTop: 0 }}>Discord notify</h3>
+        <div className="section-title" style={{ marginTop: 0 }}>Discord notify</div>
         <p className="page-sub">Webhook must be https://discord.com/api/webhooks/…</p>
         <div className="field">
-          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8, textTransform: 'none', letterSpacing: 0 }}>
             <input
               type="checkbox"
               checked={truthy(settings.discordEnable)}
               onChange={(e) => setSettings({ ...settings, discordEnable: e.target.checked ? 'true' : 'false' })}
             />
-            discordEnable
+            {label('discordEnable')}
           </label>
         </div>
         <div className="field">
-          <label className="label">discordWebhook</label>
+          <label className="label">{label('discordWebhook')}</label>
           <input
             className="input"
             value={settings.discordWebhook || ''}
@@ -483,33 +517,33 @@ export function SettingsPage() {
           />
         </div>
         <div className="field">
-          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8, textTransform: 'none', letterSpacing: 0 }}>
             <input
               type="checkbox"
               checked={truthy(settings.discordNotifyLogin)}
               onChange={(e) => setSettings({ ...settings, discordNotifyLogin: e.target.checked ? 'true' : 'false' })}
             />
-            discordNotifyLogin
+            {label('discordNotifyLogin')}
           </label>
         </div>
-        <div className="row-actions">
+        <div className="toolbar">
           <button className="btn" type="button" onClick={save}>{tr('save')}</button>
-          <button className="btn secondary" type="button" disabled={discordBusy} onClick={() => { void testDiscord() }}>
+          <button className="btn secondary btn-sm" type="button" disabled={discordBusy} onClick={() => { void testDiscord() }}>
             {discordBusy ? '…' : 'Test Discord'}
           </button>
         </div>
       </div>
 
       <div className="card" style={{ marginTop: 12 }}>
-        <h3 style={{ marginTop: 0 }}>Sub balancers</h3>
+        <div className="section-title" style={{ marginTop: 0 }}>Sub balancers</div>
         <p className="page-sub">Clash/JSON proxy-groups (url-test over all proxies in matching sub).</p>
         <div className="grid2">
           <div className="field">
-            <label className="label">name</label>
+            <label className="label">Name</label>
             <input className="input" value={balForm.name} onChange={(e) => setBalForm({ ...balForm, name: e.target.value })} />
           </div>
           <div className="field">
-            <label className="label">strategy</label>
+            <label className="label">Strategy</label>
             <select className="select" value={balForm.strategy} onChange={(e) => setBalForm({ ...balForm, strategy: e.target.value })}>
               <option value="url-test">url-test</option>
               <option value="fallback">fallback</option>
@@ -517,15 +551,15 @@ export function SettingsPage() {
             </select>
           </div>
           <div className="field" style={{ gridColumn: '1 / -1' }}>
-            <label className="label">selector (csv emails or inbound tags; empty = all)</label>
+            <label className="label">Selector (csv emails or inbound tags; empty = all)</label>
             <input className="input" value={balForm.selector} onChange={(e) => setBalForm({ ...balForm, selector: e.target.value })} />
           </div>
           <div className="field">
-            <label className="label">remark</label>
+            <label className="label">{tr('remark')}</label>
             <input className="input" value={balForm.remark} onChange={(e) => setBalForm({ ...balForm, remark: e.target.value })} />
           </div>
         </div>
-        <button className="btn" type="button" onClick={() => { void createBalancer() }}>{tr('create')}</button>
+        <button className="btn btn-sm" type="button" onClick={() => { void createBalancer() }}>{tr('create')}</button>
         <table className="table" style={{ marginTop: 12 }}>
           <thead>
             <tr><th>Name</th><th>Strategy</th><th>Selector</th><th>{tr('status')}</th><th>{tr('actions')}</th></tr>
@@ -538,12 +572,12 @@ export function SettingsPage() {
                 <td>{b.strategy}</td>
                 <td style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.selector || '—'}</td>
                 <td>
-                  <button className="btn secondary" type="button" onClick={() => { void toggleBalancer(b) }}>
+                  <button className="btn btn-sm secondary" type="button" onClick={() => { void toggleBalancer(b) }}>
                     {b.enable ? tr('enable') : tr('disable')}
                   </button>
                 </td>
                 <td>
-                  <button className="btn danger" type="button" onClick={() => { void deleteBalancer(b.id) }}>{tr('delete')}</button>
+                  <button className="btn btn-sm danger" type="button" onClick={() => setConfirmBalId(b.id)}>{tr('delete')}</button>
                 </td>
               </tr>
             ))}
@@ -552,19 +586,32 @@ export function SettingsPage() {
       </div>
 
       <div className="card" style={{ marginTop: 12 }}>
-        <h3 style={{ marginTop: 0 }}>Password</h3>
+        <div className="section-title" style={{ marginTop: 0 }}>Password</div>
         <div className="grid2">
           <div className="field">
-            <label className="label">Old</label>
+            <label className="label">Current password</label>
             <input className="input" type="password" value={pw.oldPassword} onChange={(e) => setPw({ ...pw, oldPassword: e.target.value })} />
           </div>
           <div className="field">
-            <label className="label">New</label>
+            <label className="label">New password</label>
             <input className="input" type="password" value={pw.newPassword} onChange={(e) => setPw({ ...pw, newPassword: e.target.value })} />
           </div>
         </div>
         <button className="btn secondary" onClick={changePassword}>{tr('save')}</button>
       </div>
+
+      <ConfirmModal
+        open={confirmBalId != null}
+        title={tr('confirmDeleteTitle')}
+        message={tr('confirmDeleteBalancer')}
+        danger
+        onCancel={() => setConfirmBalId(null)}
+        onConfirm={() => {
+          const id = confirmBalId
+          setConfirmBalId(null)
+          if (id != null) void deleteBalancer(id)
+        }}
+      />
     </div>
   )
 }

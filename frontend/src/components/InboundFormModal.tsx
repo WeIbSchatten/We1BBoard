@@ -570,22 +570,6 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
       </form>
       <style>{`
         .inbound-modal { width: min(820px, 100%); }
-        .tabs { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0 0 1rem; }
-        .tab {
-          border: 1px solid var(--border);
-          background: transparent;
-          color: var(--text-muted);
-          border-radius: 999px;
-          padding: 0.4rem 0.85rem;
-          cursor: pointer;
-          font-weight: 600;
-          font-size: 0.85rem;
-        }
-        .tab.active {
-          background: var(--accent-soft);
-          color: var(--accent);
-          border-color: transparent;
-        }
         .hint { color: var(--text-muted); font-weight: 400; font-size: 0.8em; }
       `}</style>
     </div>

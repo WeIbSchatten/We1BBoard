@@ -7,6 +7,7 @@ import (
 	goruntime "runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
@@ -288,6 +289,44 @@ func (a *API) ResetClientTraffic(c *gin.Context) {
 	ok(c, nil)
 }
 
+func (a *API) KickClient(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	var cl model.Client
+	if err := database.DB.First(&cl, id).Error; err != nil {
+		fail(c, 404, err)
+		return
+	}
+	email := strings.TrimSpace(cl.Email)
+	ips, _ := clientonline.ListIPs(email)
+	ipCount := len(ips)
+	_ = clientonline.ClearIPs(email)
+	clientonline.ClearLimitWarning(email)
+
+	note := fmt.Sprintf("[panel] Clear IPs & warn %s (cleared %d IPs)", time.Now().UTC().Format(time.RFC3339), ipCount)
+	comment := strings.TrimSpace(cl.Comment)
+	if comment == "" {
+		comment = note
+	} else if !strings.Contains(comment, note) {
+		if len(comment)+len(note)+3 > 512 {
+			// keep newest note, trim old
+			comment = note
+		} else {
+			comment = comment + " | " + note
+		}
+	}
+	_ = database.DB.Model(&model.Client{}).Where("id = ?", cl.ID).Update("comment", comment).Error
+	panellog.Append("client kick: id=%d email=%s cleared_ips=%d", cl.ID, email, ipCount)
+	ok(c, gin.H{"email": email, "cleared": ipCount, "comment": comment})
+}
+
+func (a *API) ClientsLimitWarnings(c *gin.Context) {
+	list := clientonline.ListLimitWarnings()
+	if list == nil {
+		list = []clientonline.LimitWarning{}
+	}
+	ok(c, list)
+}
+
 func (a *API) BulkAdjustClients(c *gin.Context) {
 	var req struct {
 		IDs     []uint `json:"ids"`
@@ -371,6 +410,7 @@ func (a *API) ClearClientIPs(c *gin.Context) {
 		fail(c, 500, err)
 		return
 	}
+	clientonline.ClearLimitWarning(email)
 	ok(c, nil)
 }
 

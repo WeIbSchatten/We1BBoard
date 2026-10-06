@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type Host, type Inbound } from '../api'
 import { useApp } from '../AppContext'
+import { ConfirmModal } from '../components/ConfirmModal'
 import { HostFormModal, emptyHost } from '../components/HostFormModal'
 
 export function HostsPage() {
@@ -10,6 +11,7 @@ export function HostsPage() {
   const [modal, setModal] = useState<{ open: boolean; mode: 'add' | 'edit'; host: Host | null }>({
     open: false, mode: 'add', host: null,
   })
+  const [confirmId, setConfirmId] = useState<number | null>(null)
 
   async function load() {
     const [hosts, ib] = await Promise.all([
@@ -23,7 +25,6 @@ export function HostsPage() {
   useEffect(() => { load().catch(console.error) }, [])
 
   async function remove(id: number) {
-    if (!confirm(`${tr('delete')} host?`)) return
     await api(`/hosts/${id}`, { method: 'DELETE' })
     await load()
   }
@@ -80,14 +81,27 @@ export function HostsPage() {
                   </button>
                 </td>
                 <td className="row-actions">
-                  <button className="btn secondary" onClick={() => setModal({ open: true, mode: 'edit', host: h })}>{tr('edit')}</button>
-                  <button className="btn danger" onClick={() => { void remove(h.id) }}>{tr('delete')}</button>
+                  <button className="btn btn-sm secondary" onClick={() => setModal({ open: true, mode: 'edit', host: h })}>{tr('edit')}</button>
+                  <button className="btn btn-sm danger" onClick={() => setConfirmId(h.id)}>{tr('delete')}</button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      <ConfirmModal
+        open={confirmId != null}
+        title={tr('confirmDeleteTitle')}
+        message={tr('confirmDeleteHost')}
+        danger
+        onCancel={() => setConfirmId(null)}
+        onConfirm={() => {
+          const id = confirmId
+          setConfirmId(null)
+          if (id != null) void remove(id)
+        }}
+      />
 
       <HostFormModal
         open={modal.open}
