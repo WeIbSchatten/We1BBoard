@@ -67,6 +67,34 @@ func blockedHostName(host string) bool {
 		strings.HasSuffix(lower, ".internal")
 }
 
+// ValidateDialHost rejects localhost/metadata names and private/loopback IPs
+// (literal or after DNS resolve). Used for SSRF-sensitive dials (e.g. REALITY scan).
+func ValidateDialHost(host string) error {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return fmt.Errorf("host is required")
+	}
+	if blockedHostName(host) {
+		return fmt.Errorf("host not allowed")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if isBlockedIP(ip) {
+			return fmt.Errorf("must not point to private/loopback addresses")
+		}
+		return nil
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil || len(ips) == 0 {
+		return fmt.Errorf("host cannot be resolved")
+	}
+	for _, ip := range ips {
+		if isBlockedIP(ip) {
+			return fmt.Errorf("must not point to private/loopback addresses")
+		}
+	}
+	return nil
+}
+
 // ValidateNodeURL rejects non-http(s) schemes and SSRF targets for remote nodes.
 // For hostnames it resolves DNS and rejects private/loopback/link-local answers.
 func ValidateNodeURL(raw string) error {
@@ -84,23 +112,8 @@ func ValidateNodeURL(raw string) error {
 	if host == "" {
 		return fmt.Errorf("invalid node url host")
 	}
-	if blockedHostName(host) {
-		return fmt.Errorf("node url host not allowed")
-	}
-	if ip := net.ParseIP(host); ip != nil {
-		if isBlockedIP(ip) {
-			return fmt.Errorf("node url must not point to private/loopback addresses")
-		}
-		return nil
-	}
-	ips, err := net.LookupIP(host)
-	if err != nil || len(ips) == 0 {
-		return fmt.Errorf("node url host cannot be resolved")
-	}
-	for _, ip := range ips {
-		if isBlockedIP(ip) {
-			return fmt.Errorf("node url must not point to private/loopback addresses")
-		}
+	if err := ValidateDialHost(host); err != nil {
+		return fmt.Errorf("node url %v", err)
 	}
 	return nil
 }

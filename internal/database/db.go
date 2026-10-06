@@ -183,7 +183,8 @@ func seed(db *gorm.DB) error {
 		"keyFile":      "",
 		"secret":       mustRandomSecret(),
 		"nodeToken":    mustRandomSecret(),
-		"trafficCron":  "@every 10s",
+		"trafficCron":            "@every 10s",
+		"routingDomainStrategy":  "AsIs",
 	}
 	for k, v := range defaults {
 		var s model.Setting
@@ -312,4 +313,5 @@ var AllowedSettingKeys = map[string]bool{
 	"theme": true, "accent": true, "lang": true,
 	"xrayTemplate": true, "certFile": true, "keyFile": true,
 	"trafficCron": true,
+	"routingDomainStrategy": true,
 }

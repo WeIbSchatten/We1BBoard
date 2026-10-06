@@ -187,6 +187,15 @@ func (a *API) DeleteInbound(c *gin.Context) {
 	ok(c, nil)
 }
 
+func (a *API) DisableInvalidInbounds(c *gin.Context) {
+	n, err := a.Inbound.DisableInvalid()
+	if err != nil {
+		fail(c, 500, err)
+		return
+	}
+	ok(c, gin.H{"count": n})
+}
+
 func (a *API) CreateClient(c *gin.Context) {
 	var cl model.Client
 	if err := c.ShouldBindJSON(&cl); err != nil {
@@ -218,6 +227,15 @@ func (a *API) UpdateClient(c *gin.Context) {
 func (a *API) DeleteClient(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
 	if err := a.Client.Delete(uint(id)); err != nil {
+		fail(c, 400, err)
+		return
+	}
+	ok(c, nil)
+}
+
+func (a *API) ResetClientTraffic(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	if err := a.Client.ResetTraffic(uint(id)); err != nil {
 		fail(c, 400, err)
 		return
 	}
@@ -352,6 +370,52 @@ func (a *API) XrayConfig(c *gin.Context) {
 		return
 	}
 	ok(c, cfg)
+}
+
+// XrayConfigIssues lists enabled inbounds skipped during config generation.
+func (a *API) XrayConfigIssues(c *gin.Context) {
+	issues, err := a.Xray.ConfigIssues()
+	if err != nil {
+		fail(c, 500, err)
+		return
+	}
+	ok(c, gin.H{"issues": issues})
+}
+
+// XrayLogs returns the last N lines from access/error/process log files.
+// GET /xray/logs?source=error|access|process&lines=200
+func (a *API) XrayLogs(c *gin.Context) {
+	source := strings.ToLower(strings.TrimSpace(c.DefaultQuery("source", "error")))
+	lines := 200
+	if v := c.Query("lines"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			lines = n
+		}
+	}
+	if lines <= 0 {
+		lines = 200
+	}
+	if lines > 2000 {
+		lines = 2000
+	}
+	var path string
+	switch source {
+	case "error":
+		path = a.Xray.ErrorLogPath()
+	case "access":
+		path = a.Xray.AccessLogPath()
+	case "process":
+		path = a.Xray.ProcessLogPath()
+	default:
+		fail(c, 400, fmt.Errorf("source must be error, access, or process"))
+		return
+	}
+	out, err := xray.TailFile(path, lines)
+	if err != nil {
+		fail(c, 500, err)
+		return
+	}
+	ok(c, gin.H{"source": source, "lines": out, "path": path})
 }
 
 func (a *API) XrayRestart(c *gin.Context) {

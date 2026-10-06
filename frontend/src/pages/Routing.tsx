@@ -3,27 +3,47 @@ import { api, type Inbound, type Outbound } from '../api'
 import { useApp } from '../AppContext'
 import { RoutingFormModal, type RoutingRule } from '../components/RoutingFormModal'
 
+const DOMAIN_STRATEGIES = ['AsIs', 'IPIfNonMatch', 'IPOnDemand'] as const
+
 export function RoutingPage() {
   const { tr } = useApp()
   const [rows, setRows] = useState<RoutingRule[]>([])
   const [inbounds, setInbounds] = useState<Inbound[]>([])
   const [outbounds, setOutbounds] = useState<Outbound[]>([])
+  const [domainStrategy, setDomainStrategy] = useState<string>('AsIs')
+  const [savingStrategy, setSavingStrategy] = useState(false)
   const [modal, setModal] = useState<{ open: boolean; mode: 'add' | 'edit'; rule: RoutingRule | null }>({
     open: false, mode: 'add', rule: null,
   })
 
   async function load() {
-    const [r, ib, ob] = await Promise.all([
+    const [r, ib, ob, settings] = await Promise.all([
       api<RoutingRule[]>('/routing'),
       api<Inbound[]>('/inbounds'),
       api<Outbound[]>('/outbounds'),
+      api<Record<string, string>>('/settings'),
     ])
     setRows(r)
     setInbounds(ib)
     setOutbounds(ob)
+    const ds = settings.routingDomainStrategy || 'AsIs'
+    setDomainStrategy(DOMAIN_STRATEGIES.includes(ds as typeof DOMAIN_STRATEGIES[number]) ? ds : 'AsIs')
   }
 
   useEffect(() => { load().catch(console.error) }, [])
+
+  async function saveDomainStrategy(value: string) {
+    setDomainStrategy(value)
+    setSavingStrategy(true)
+    try {
+      await api('/settings', { method: 'POST', body: JSON.stringify({ routingDomainStrategy: value }) })
+      await api('/xray/restart', { method: 'POST' })
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setSavingStrategy(false)
+    }
+  }
 
   async function remove(id: number) {
     if (!confirm('Delete rule?')) return
@@ -40,6 +60,20 @@ export function RoutingPage() {
         </div>
         <button className="btn" onClick={() => setModal({ open: true, mode: 'add', rule: null })}>{tr('create')}</button>
       </div>
+
+      <div className="card" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <label className="label" style={{ margin: 0 }}>{tr('domainStrategy')}</label>
+        <select
+          className="select"
+          style={{ width: 'auto', minWidth: 160 }}
+          value={domainStrategy}
+          disabled={savingStrategy}
+          onChange={(e) => { void saveDomainStrategy(e.target.value) }}
+        >
+          {DOMAIN_STRATEGIES.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+
       <div className="card">
         <table className="table">
           <thead>

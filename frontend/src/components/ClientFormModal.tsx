@@ -31,6 +31,7 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
   const [flow, setFlow] = useState('')
   const [enable, setEnable] = useState(true)
   const [totalGB, setTotalGB] = useState(0)
+  const [limitIp, setLimitIp] = useState(0)
   const [expiryDays, setExpiryDays] = useState(0)
   const [tgId, setTgId] = useState(0)
   const [comment, setComment] = useState('')
@@ -58,6 +59,7 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
       setFlow(client.flow || '')
       setEnable(client.enable)
       setTotalGB(client.totalGB || 0)
+      setLimitIp(client.limitIp || 0)
       setComment(client.comment || '')
       setTgId(client.tgId || 0)
       if (client.expiryTime > 0) {
@@ -72,6 +74,7 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
       setSubId(randomLowerAndNum(16))
       setEnable(true)
       setTotalGB(0)
+      setLimitIp(0)
       setExpiryDays(0)
       setComment('')
       setTgId(0)
@@ -107,6 +110,7 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
         flow,
         enable,
         totalGB,
+        limitIp,
         comment,
         tgId,
         expiryTime: expiryDays > 0 ? Date.now() + expiryDays * 86400000 : 0,
@@ -164,6 +168,10 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
             <div className="field">
               <label className="label">Total GB (0 = ∞)</label>
               <input className="input" type="number" min={0} value={totalGB} onChange={(e) => setTotalGB(Number(e.target.value))} />
+            </div>
+            <div className="field">
+              <label className="label">Limit IP (0 = ∞)</label>
+              <input className="input" type="number" min={0} value={limitIp} onChange={(e) => setLimitIp(Number(e.target.value))} />
             </div>
             <div className="field">
               <label className="label">Expiry days (0 = never)</label>

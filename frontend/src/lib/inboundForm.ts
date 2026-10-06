@@ -28,6 +28,8 @@ export type InboundFormState = {
   tlsFingerprint: string
   tlsCertFile: string
   tlsKeyFile: string
+  tlsCertContent: string
+  tlsKeyContent: string
   // reality
   realityDest: string
   realitySNI: string
@@ -43,6 +45,11 @@ export type InboundFormState = {
   sniffEnabled: boolean
   sniffDestOverride: string
   sniffRouteOnly: boolean
+  sniffMetadataOnly: boolean
+  sniffDomainsExcluded: string
+  sniffIpsExcluded: string
+  // advanced
+  fallbacksJSON: string
 }
 
 /** SS2022 password: base64 of 16 (aes-128) or 32 (aes-256 / other) random bytes. */
@@ -77,6 +84,8 @@ export function emptyInboundForm(): InboundFormState {
     tlsFingerprint: 'chrome',
     tlsCertFile: '',
     tlsKeyFile: '',
+    tlsCertContent: '',
+    tlsKeyContent: '',
     realityDest: '',
     realitySNI: '',
     realityPrivateKey: '',
@@ -89,6 +98,10 @@ export function emptyInboundForm(): InboundFormState {
     sniffEnabled: false,
     sniffDestOverride: 'http,tls,quic,fakedns',
     sniffRouteOnly: false,
+    sniffMetadataOnly: false,
+    sniffDomainsExcluded: '',
+    sniffIpsExcluded: '',
+    fallbacksJSON: '[]',
   }
 }
 
@@ -137,6 +150,12 @@ export function parseInboundToForm(inb: {
     if (certs[0]) {
       f.tlsCertFile = String(certs[0].certificateFile || '')
       f.tlsKeyFile = String(certs[0].keyFile || '')
+      const certContent = certs[0].certificate
+      const keyContent = certs[0].key
+      if (Array.isArray(certContent)) f.tlsCertContent = certContent.map(String).join('\n')
+      else if (typeof certContent === 'string') f.tlsCertContent = certContent
+      if (Array.isArray(keyContent)) f.tlsKeyContent = keyContent.map(String).join('\n')
+      else if (typeof keyContent === 'string') f.tlsKeyContent = keyContent
     }
     const rs = (stream.realitySettings || {}) as Record<string, unknown>
     f.realityDest = String(rs.dest || rs.target || '')
@@ -153,6 +172,9 @@ export function parseInboundToForm(inb: {
     const settings = JSON.parse(inb.settings || '{}') as Record<string, unknown>
     if (typeof settings.method === 'string') f.ssMethod = settings.method
     if (typeof settings.password === 'string') f.ssPassword = settings.password
+    if (settings.fallbacks !== undefined) {
+      f.fallbacksJSON = JSON.stringify(settings.fallbacks, null, 2)
+    }
   } catch { /* */ }
   try {
     const sniff = JSON.parse(inb.sniffing || '{}') as Record<string, unknown>
@@ -160,8 +182,21 @@ export function parseInboundToForm(inb: {
     const dest = sniff.destOverride as string[] | undefined
     if (dest?.length) f.sniffDestOverride = dest.join(',')
     f.sniffRouteOnly = Boolean(sniff.routeOnly)
+    f.sniffMetadataOnly = Boolean(sniff.metadataOnly)
+    const domainsEx = sniff.domainsExcluded as string[] | undefined
+    if (domainsEx?.length) f.sniffDomainsExcluded = domainsEx.join(',')
+    const ipsEx = sniff.ipsExcluded as string[] | undefined
+    if (ipsEx?.length) f.sniffIpsExcluded = ipsEx.join(',')
   } catch { /* */ }
   return f
+}
+
+function pemToLines(pem: string): string[] {
+  return pem.replace(/\r\n/g, '\n').split('\n').filter((l) => l.length > 0)
+}
+
+function csvList(s: string): string[] {
+  return s.split(',').map((x) => x.trim()).filter(Boolean)
 }
 
 export function buildStreamSettings(f: InboundFormState): string {
@@ -205,6 +240,18 @@ export function buildStreamSettings(f: InboundFormState): string {
       stream.tcpSettings = { acceptProxyProtocol: false, header: { type: 'none' } }
   }
   if (f.security === 'tls') {
+    const useContent = Boolean(f.tlsCertContent.trim() || f.tlsKeyContent.trim())
+    const cert: Record<string, unknown> = {
+      usage: 'encipherment',
+      ocspStapling: 0,
+    }
+    if (useContent) {
+      cert.certificate = pemToLines(f.tlsCertContent)
+      cert.key = pemToLines(f.tlsKeyContent)
+    } else {
+      cert.certificateFile = f.tlsCertFile || ''
+      cert.keyFile = f.tlsKeyFile || ''
+    }
     stream.tlsSettings = {
       serverName: f.tlsSNI || '',
       minVersion: '1.2',
@@ -212,13 +259,8 @@ export function buildStreamSettings(f: InboundFormState): string {
       cipherSuites: '',
       rejectUnknownSni: false,
       allowInsecure: false,
-      alpn: f.tlsALPN ? f.tlsALPN.split(',').map((s) => s.trim()).filter(Boolean) : ['h2', 'http/1.1'],
-      certificates: [{
-        certificateFile: f.tlsCertFile || '',
-        keyFile: f.tlsKeyFile || '',
-        usage: 'encipherment',
-        ocspStapling: 0,
-      }],
+      alpn: f.tlsALPN ? csvList(f.tlsALPN) : ['h2', 'http/1.1'],
+      certificates: [cert],
       settings: { fingerprint: f.tlsFingerprint || 'chrome', allowInsecure: false },
     }
   }
@@ -251,7 +293,23 @@ export function buildStreamSettings(f: InboundFormState): string {
   return JSON.stringify(stream)
 }
 
+function parseFallbacks(raw: string): unknown[] {
+  const t = (raw || '').trim()
+  if (!t) return []
+  const parsed = JSON.parse(t) as unknown
+  if (!Array.isArray(parsed)) throw new Error('fallbacks must be a JSON array')
+  return parsed
+}
+
 export function buildInboundSettings(f: InboundFormState): string {
+  let fallbacks: unknown[] = []
+  if (f.protocol === 'vless' || f.protocol === 'trojan') {
+    try {
+      fallbacks = parseFallbacks(f.fallbacksJSON)
+    } catch (e) {
+      throw e instanceof Error ? e : new Error('invalid fallbacks JSON')
+    }
+  }
   switch (f.protocol) {
     case 'shadowsocks':
       return JSON.stringify({
@@ -261,11 +319,11 @@ export function buildInboundSettings(f: InboundFormState): string {
         clients: [],
       })
     case 'vless':
-      return JSON.stringify({ clients: [], decryption: 'none', encryption: 'none', fallbacks: [] })
+      return JSON.stringify({ clients: [], decryption: 'none', encryption: 'none', fallbacks })
     case 'vmess':
       return JSON.stringify({ clients: [] })
     case 'trojan':
-      return JSON.stringify({ clients: [], fallbacks: [] })
+      return JSON.stringify({ clients: [], fallbacks })
     case 'http':
     case 'socks':
       return JSON.stringify({ auth: 'password', accounts: [], udp: false, ip: '127.0.0.1' })
@@ -278,11 +336,22 @@ export function buildSniffing(f: InboundFormState): string {
   return JSON.stringify({
     enabled: f.sniffEnabled,
     destOverride: f.sniffDestOverride
-      ? f.sniffDestOverride.split(',').map((s) => s.trim()).filter(Boolean)
+      ? csvList(f.sniffDestOverride)
       : ['http', 'tls', 'quic', 'fakedns'],
-    metadataOnly: false,
+    metadataOnly: f.sniffMetadataOnly,
     routeOnly: f.sniffRouteOnly,
+    domainsExcluded: csvList(f.sniffDomainsExcluded),
+    ipsExcluded: csvList(f.sniffIpsExcluded),
   })
+}
+
+/** Quick Cloudflare dest/SNI defaults for REALITY. */
+export function applyCloudflareRealityDefaults(f: InboundFormState): InboundFormState {
+  return {
+    ...f,
+    realityDest: 'www.cloudflare.com:443',
+    realitySNI: 'www.cloudflare.com',
+  }
 }
 
 /** Apply 3x-ui Reality bootstrap when security switches to reality. */

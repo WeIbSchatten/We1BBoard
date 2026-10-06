@@ -53,6 +53,7 @@ export function OutboundFormModal({ open, mode, outbound, onClose, onSaved }: Pr
       if (key === 'protocol') {
         if (value === 'socks') next.port = 1080
         else if (value === 'http') next.port = 8080
+        else if (value === 'dns') next.port = 53
         else if (!['freedom', 'blackhole'].includes(String(value))) next.port = 443
         if (['vless', 'vmess'].includes(String(value)) && !next.uuid) next.uuid = randomUUID()
       }
@@ -60,7 +61,8 @@ export function OutboundFormModal({ open, mode, outbound, onClose, onSaved }: Pr
     })
   }
 
-  const isProxy = !['freedom', 'blackhole'].includes(form.protocol)
+  const isProxy = !['freedom', 'blackhole', 'dns'].includes(form.protocol)
+  const isDns = form.protocol === 'dns'
 
   async function resolvePasteToLinks(raw: string): Promise<string[]> {
     const trimmed = raw.trim()
@@ -234,6 +236,31 @@ export function OutboundFormModal({ open, mode, outbound, onClose, onSaved }: Pr
                   <option value="UseIPv6">UseIPv6</option>
                 </select>
               </div>
+            )}
+            {isDns && (
+              <>
+                <div className="field">
+                  <label className="label">Address</label>
+                  <input className="input" value={form.address} onChange={(e) => set('address', e.target.value)} placeholder="optional (e.g. 8.8.8.8)" />
+                </div>
+                <div className="field">
+                  <label className="label">{tr('port')}</label>
+                  <input className="input" type="number" value={form.port} onChange={(e) => set('port', Number(e.target.value))} />
+                </div>
+                <div className="field">
+                  <label className="label">{tr('network')}</label>
+                  <select className="select" value={form.dnsNetwork} onChange={(e) => set('dnsNetwork', e.target.value)}>
+                    <option value="udp">udp</option>
+                    <option value="tcp">tcp</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input type="checkbox" checked={form.dnsBlock} onChange={(e) => set('dnsBlock', e.target.checked)} />
+                    block
+                  </label>
+                </div>
+              </>
             )}
             {isProxy && (
               <>

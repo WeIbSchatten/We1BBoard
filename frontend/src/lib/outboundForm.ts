@@ -28,6 +28,9 @@ export type OutboundFormState = {
   serviceName: string
   // freedom/blackhole
   domainStrategy: string
+  // dns outbound
+  dnsNetwork: string
+  dnsBlock: boolean
 }
 
 export function emptyOutboundForm(): OutboundFormState {
@@ -53,6 +56,8 @@ export function emptyOutboundForm(): OutboundFormState {
     host: '',
     serviceName: '',
     domainStrategy: 'AsIs',
+    dnsNetwork: 'udp',
+    dnsBlock: false,
   }
 }
 
@@ -75,6 +80,11 @@ export function parseOutboundToForm(o: {
     const s = JSON.parse(o.settings || '{}') as Record<string, unknown>
     if (o.protocol === 'freedom') {
       f.domainStrategy = String(s.domainStrategy || 'AsIs')
+    } else if (o.protocol === 'dns') {
+      f.address = String(s.address || '')
+      f.port = Number(s.port || 53)
+      f.dnsNetwork = String(s.network || 'udp')
+      f.dnsBlock = !!s.block
     } else if (['vless', 'vmess', 'trojan', 'shadowsocks', 'socks', 'http'].includes(o.protocol)) {
       const servers = (s.servers || s.vnext || []) as Record<string, unknown>[]
       const first = servers[0] || {}
@@ -117,6 +127,15 @@ export function buildOutboundSettings(f: OutboundFormState): string {
       return JSON.stringify({ domainStrategy: f.domainStrategy || 'AsIs' })
     case 'blackhole':
       return JSON.stringify({})
+    case 'dns': {
+      const settings: Record<string, unknown> = {
+        port: f.port || 53,
+        network: f.dnsNetwork || 'udp',
+        block: !!f.dnsBlock,
+      }
+      if (f.address.trim()) settings.address = f.address.trim()
+      return JSON.stringify(settings)
+    }
     case 'vless':
       return JSON.stringify({
         vnext: [{
@@ -163,7 +182,7 @@ export function buildOutboundSettings(f: OutboundFormState): string {
 }
 
 export function buildOutboundStream(f: OutboundFormState): string {
-  if (['freedom', 'blackhole'].includes(f.protocol)) return '{}'
+  if (['freedom', 'blackhole', 'dns'].includes(f.protocol)) return '{}'
   const stream: Record<string, unknown> = {
     network: f.network || 'tcp',
     security: f.security || 'none',
@@ -197,7 +216,7 @@ export function buildOutboundStream(f: OutboundFormState): string {
 }
 
 export const OUTBOUND_PROTOCOLS = [
-  'vless', 'vmess', 'trojan', 'shadowsocks', 'socks', 'http', 'freedom', 'blackhole',
+  'vless', 'vmess', 'trojan', 'shadowsocks', 'socks', 'http', 'freedom', 'blackhole', 'dns',
 ]
 
 const SHARE_LINK_RE = /^(vmess|vless|trojan|ss|hysteria2|hy2|wireguard|wg):\/\//i

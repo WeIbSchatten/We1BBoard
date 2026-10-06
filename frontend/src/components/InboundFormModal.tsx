@@ -8,6 +8,7 @@ import {
   SECURITIES,
   SS_METHODS,
   FINGERPRINTS,
+  applyCloudflareRealityDefaults,
   applyRealityDefaults,
   applyTlsDefaults,
   buildInboundSettings,
@@ -31,7 +32,7 @@ type Props = {
   onSaved: (created?: Inbound) => void
 }
 
-type Tab = 'general' | 'network' | 'security' | 'sniffing'
+type Tab = 'general' | 'network' | 'security' | 'sniffing' | 'advanced'
 
 export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Props) {
   const { tr } = useApp()
@@ -94,14 +95,41 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
     }
   }
 
+  async function scanRealityTarget() {
+    const target = form.realityDest.trim() || 'www.cloudflare.com:443'
+    setError('')
+    setBusy(true)
+    try {
+      const res = await api<{ dest: string; serverNames: string[]; ok: boolean; error?: string }>('/tools/reality-scan', {
+        method: 'POST',
+        body: JSON.stringify({ target }),
+      })
+      if (!res.ok) {
+        throw new Error(res.error || 'scan failed')
+      }
+      const names = (res.serverNames || []).slice(0, 5)
+      setForm((prev) => ({
+        ...prev,
+        realityDest: res.dest || target,
+        realitySNI: names.length ? names.join(',') : prev.realitySNI,
+      }))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'scan error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault()
     setError('')
     setBusy(true)
     try {
       if (form.security === 'tls') {
-        if (!form.tlsCertFile.trim() || !form.tlsKeyFile.trim()) {
-          throw new Error('TLS certificate and key file paths are required')
+        const hasFiles = form.tlsCertFile.trim() && form.tlsKeyFile.trim()
+        const hasContent = form.tlsCertContent.trim() && form.tlsKeyContent.trim()
+        if (!hasFiles && !hasContent) {
+          throw new Error('TLS: provide cert/key file paths or paste PEM content')
         }
       }
       if (form.security === 'reality' && !form.realityPrivateKey) {
@@ -141,11 +169,13 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
   if (!open) return null
 
   const needsStream = !['tun', 'tunnel', 'mtproto', 'tuic', 'hysteria2'].includes(form.protocol)
+  const showFallbacks = form.protocol === 'vless' || form.protocol === 'trojan'
   const tabs: { id: Tab; label: string; show?: boolean }[] = [
     { id: 'general', label: tr('tabGeneral') },
     { id: 'network', label: tr('tabNetwork'), show: needsStream },
     { id: 'security', label: tr('tabSecurity'), show: needsStream },
     { id: 'sniffing', label: tr('tabSniffing'), show: needsStream },
+    { id: 'advanced', label: 'Advanced', show: showFallbacks },
   ]
 
   return (
@@ -287,12 +317,20 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
                   <input className="input" value={form.tlsALPN} onChange={(e) => set('tlsALPN', e.target.value)} placeholder="h2,http/1.1" />
                 </div>
                 <div className="field">
-                  <label className="label">Cert file path *</label>
-                  <input className="input" value={form.tlsCertFile} onChange={(e) => set('tlsCertFile', e.target.value)} placeholder="/path/to/fullchain.pem" required={form.security === 'tls'} />
+                  <label className="label">Cert file path</label>
+                  <input className="input" value={form.tlsCertFile} onChange={(e) => set('tlsCertFile', e.target.value)} placeholder="/path/to/fullchain.pem" />
                 </div>
                 <div className="field">
-                  <label className="label">Key file path *</label>
-                  <input className="input" value={form.tlsKeyFile} onChange={(e) => set('tlsKeyFile', e.target.value)} placeholder="/path/to/privkey.pem" required={form.security === 'tls'} />
+                  <label className="label">Key file path</label>
+                  <input className="input" value={form.tlsKeyFile} onChange={(e) => set('tlsKeyFile', e.target.value)} placeholder="/path/to/privkey.pem" />
+                </div>
+                <div className="field" style={{ gridColumn: '1 / -1' }}>
+                  <label className="label">Cert PEM content <span className="hint">(optional alternative to file)</span></label>
+                  <textarea className="input" rows={4} value={form.tlsCertContent} onChange={(e) => set('tlsCertContent', e.target.value)} placeholder="-----BEGIN CERTIFICATE-----" />
+                </div>
+                <div className="field" style={{ gridColumn: '1 / -1' }}>
+                  <label className="label">Key PEM content <span className="hint">(optional alternative to file)</span></label>
+                  <textarea className="input" rows={4} value={form.tlsKeyContent} onChange={(e) => set('tlsKeyContent', e.target.value)} placeholder="-----BEGIN PRIVATE KEY-----" />
                 </div>
                 <div className="field">
                   <label className="label">Fingerprint</label>
@@ -306,13 +344,17 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
               <>
                 <div className="row-actions" style={{ marginBottom: 10 }}>
                   <button type="button" className="btn secondary" onClick={() => refreshKeys()}>{tr('genKeys')}</button>
+                  <button type="button" className="btn secondary" onClick={() => setForm((prev) => applyCloudflareRealityDefaults(prev))}>Fill Cloudflare defaults</button>
                   <button type="button" className="btn secondary" onClick={() => set('realityShortIds', randomShortIds().join(','))}>ShortIds</button>
                   <button type="button" className="btn secondary" onClick={() => set('realitySpiderX', randomSpiderX())}>SpiderX</button>
                 </div>
                 <div className="grid2">
                   <div className="field">
                     <label className="label">Dest / target *</label>
-                    <input className="input" value={form.realityDest} onChange={(e) => set('realityDest', e.target.value)} placeholder="www.cloudflare.com:443" required={form.security === 'reality'} />
+                    <div className="row-actions">
+                      <input className="input" value={form.realityDest} onChange={(e) => set('realityDest', e.target.value)} placeholder="www.cloudflare.com:443" required={form.security === 'reality'} />
+                      <button type="button" className="btn secondary" disabled={busy} onClick={() => { void scanRealityTarget() }}>{tr('scan')}</button>
+                    </div>
                   </div>
                   <div className="field">
                     <label className="label">ServerNames (SNI) *</label>
@@ -360,10 +402,38 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
                 routeOnly
               </label>
             </div>
+            <div className="field">
+              <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input type="checkbox" checked={form.sniffMetadataOnly} onChange={(e) => set('sniffMetadataOnly', e.target.checked)} />
+                metadataOnly
+              </label>
+            </div>
             <div className="field" style={{ gridColumn: '1 / -1' }}>
               <label className="label">destOverride (csv)</label>
               <input className="input" value={form.sniffDestOverride} onChange={(e) => set('sniffDestOverride', e.target.value)} />
             </div>
+            <div className="field">
+              <label className="label">domainsExcluded (csv)</label>
+              <input className="input" value={form.sniffDomainsExcluded} onChange={(e) => set('sniffDomainsExcluded', e.target.value)} />
+            </div>
+            <div className="field">
+              <label className="label">ipsExcluded (csv)</label>
+              <input className="input" value={form.sniffIpsExcluded} onChange={(e) => set('sniffIpsExcluded', e.target.value)} />
+            </div>
+          </div>
+        )}
+
+        {tab === 'advanced' && showFallbacks && (
+          <div className="field">
+            <label className="label">Fallbacks (JSON array)</label>
+            <textarea
+              className="input"
+              rows={10}
+              value={form.fallbacksJSON}
+              onChange={(e) => set('fallbacksJSON', e.target.value)}
+              placeholder='[{"dest":"80","xver":0}]'
+              style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: '0.85rem' }}
+            />
           </div>
         )}
 

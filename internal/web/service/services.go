@@ -11,6 +11,7 @@ import (
 	"github.com/we1bboard/we1bboard/internal/sub"
 	"github.com/we1bboard/we1bboard/internal/ufw"
 	"github.com/we1bboard/we1bboard/internal/web/runtime"
+	"github.com/we1bboard/we1bboard/internal/xray"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -39,6 +40,11 @@ func (s *InboundService) Create(in *model.Inbound) error {
 	}
 	if err := adap.Validate(in); err != nil {
 		return err
+	}
+	if adap.Engine() == "xray" {
+		if err := xray.ValidateInboundStream(in.StreamSettings); err != nil {
+			return err
+		}
 	}
 	if in.Tag == "" {
 		in.Tag = fmt.Sprintf("inbound-%s-%d", in.Protocol, in.Port)
@@ -72,6 +78,11 @@ func (s *InboundService) Update(in *model.Inbound) error {
 	}
 	if err := adap.Validate(in); err != nil {
 		return err
+	}
+	if adap.Engine() == "xray" {
+		if err := xray.ValidateInboundStream(in.StreamSettings); err != nil {
+			return err
+		}
 	}
 	var old model.Inbound
 	if err := database.DB.First(&old, in.ID).Error; err != nil {
@@ -119,6 +130,33 @@ func (s *InboundService) Delete(id uint) error {
 	}
 	_ = s.RT.ForNode(in.NodeID).Reload()
 	return nil
+}
+
+// DisableInvalid finds enabled Xray inbounds that fail stream validation, sets enable=false, reloads.
+func (s *InboundService) DisableInvalid() (int, error) {
+	var rows []model.Inbound
+	if err := database.DB.Where("enable = ?", true).Find(&rows).Error; err != nil {
+		return 0, err
+	}
+	n := 0
+	for i := range rows {
+		in := &rows[i]
+		adap, err := protocol.Get(in.Protocol)
+		if err != nil || adap.Engine() != "xray" {
+			continue
+		}
+		if err := xray.ValidateInboundStream(in.StreamSettings); err == nil {
+			continue
+		}
+		if err := database.DB.Model(in).Update("enable", false).Error; err != nil {
+			return n, err
+		}
+		n++
+	}
+	if n > 0 {
+		_ = s.RT.ReloadLocal()
+	}
+	return n, nil
 }
 
 type ClientService struct {
@@ -207,6 +245,18 @@ func (s *ClientService) Delete(id uint) error {
 	var in model.Inbound
 	_ = database.DB.First(&in, c.InboundID)
 	_ = s.RT.ForNode(in.NodeID).Reload()
+	return nil
+}
+
+// ResetTraffic zeroes up/down counters for a client.
+func (s *ClientService) ResetTraffic(id uint) error {
+	res := database.DB.Model(&model.Client{}).Where("id = ?", id).Updates(map[string]any{"up": 0, "down": 0})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return fmt.Errorf("client not found")
+	}
 	return nil
 }
 

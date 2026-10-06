@@ -102,6 +102,9 @@ func buildVLESSClients(clients []model.Client) []map[string]any {
 		if c.Flow != "" {
 			m["flow"] = c.Flow
 		}
+		if c.LimitIP > 0 {
+			m["limitIp"] = c.LimitIP
+		}
 		out = append(out, m)
 	}
 	return out
@@ -113,9 +116,13 @@ func buildVMessClients(clients []model.Client) []map[string]any {
 		if !c.Enable {
 			continue
 		}
-		out = append(out, map[string]any{
+		m := map[string]any{
 			"id": c.UUID, "email": c.Email, "alterId": 0,
-		})
+		}
+		if c.LimitIP > 0 {
+			m["limitIp"] = c.LimitIP
+		}
+		out = append(out, m)
 	}
 	return out
 }
@@ -130,7 +137,11 @@ func buildTrojanClients(clients []model.Client) []map[string]any {
 		if pw == "" {
 			pw = c.UUID
 		}
-		out = append(out, map[string]any{"password": pw, "email": c.Email})
+		m := map[string]any{"password": pw, "email": c.Email}
+		if c.LimitIP > 0 {
+			m["limitIp"] = c.LimitIP
+		}
+		out = append(out, m)
 	}
 	return out
 }
@@ -146,9 +157,13 @@ func buildSSClients(clients []model.Client, settings map[string]any) []map[strin
 		if pw == "" {
 			pw = c.UUID
 		}
-		out = append(out, map[string]any{
+		m := map[string]any{
 			"password": pw, "email": c.Email, "method": method,
-		})
+		}
+		if c.LimitIP > 0 {
+			m["limitIp"] = c.LimitIP
+		}
+		out = append(out, m)
 	}
 	return out
 }

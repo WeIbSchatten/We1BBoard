@@ -10,6 +10,7 @@ import { InboundsPage } from './pages/Inbounds'
 import { LoginPage } from './pages/Login'
 import { NodesPage } from './pages/Nodes'
 import { OutboundsPage } from './pages/Outbounds'
+import { LogsPage } from './pages/Logs'
 import { RoutingPage } from './pages/Routing'
 import { SettingsPage } from './pages/Settings'
 import { TgProxyPage } from './pages/TgProxy'
@@ -33,6 +34,7 @@ function Authed() {
         <Route path="/nodes" element={<NodesPage />} />
         <Route path="/tgproxy" element={<TgProxyPage />} />
         <Route path="/routing" element={<RoutingPage />} />
+        <Route path="/logs" element={<LogsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

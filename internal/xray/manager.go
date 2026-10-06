@@ -3,8 +3,11 @@ package xray
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/we1bboard/we1bboard/internal/database"
@@ -13,11 +16,14 @@ import (
 	"github.com/we1bboard/we1bboard/internal/supervisor"
 )
 
+const processLogMaxBytes = 8 << 20 // 8 MiB
+
 type Manager struct {
 	Bin        string
 	ConfigDir  string
 	APIPort    int
 	proc       *supervisor.Process
+	procLog    *os.File
 	mu         sync.Mutex
 	configPath string
 }
@@ -67,15 +73,9 @@ func (m *Manager) GenerateConfig() (map[string]any, error) {
 	xInbounds := []map[string]any{apiInbound}
 	for i := range inbounds {
 		in := &inbounds[i]
-		if in.Tag == "" {
-			in.Tag = fmt.Sprintf("inbound-%d", in.ID)
-		}
-		adap, err := protocol.Get(in.Protocol)
-		if err != nil || adap.Engine() != "xray" {
-			continue
-		}
-		obj, err := adap.ToXrayInbound(in, in.Clients)
-		if err != nil {
+		obj, issue := buildXrayInbound(in)
+		if issue != nil {
+			log.Printf("[xray] skip inbound id=%d tag=%s: %s", in.ID, issue.Tag, issue.Reason)
 			continue
 		}
 		xInbounds = append(xInbounds, obj)
@@ -154,7 +154,11 @@ func (m *Manager) GenerateConfig() (map[string]any, error) {
 	}
 
 	cfg := map[string]any{
-		"log": map[string]any{"loglevel": "warning"},
+		"log": map[string]any{
+			"loglevel": "warning",
+			"access":   filepath.Join(m.ConfigDir, "access.log"),
+			"error":    filepath.Join(m.ConfigDir, "error.log"),
+		},
 		"api": map[string]any{
 			"tag":      "api",
 			"services": []string{"HandlerService", "LoggerService", "StatsService"},
@@ -174,11 +178,70 @@ func (m *Manager) GenerateConfig() (map[string]any, error) {
 		"inbounds":  xInbounds,
 		"outbounds": xOutbounds,
 		"routing": map[string]any{
-			"domainStrategy": "AsIs",
+			"domainStrategy": routingDomainStrategy(),
 			"rules":          routingRules,
 		},
 	}
 	return cfg, nil
+}
+
+// ConfigIssue describes an enabled inbound skipped while generating Xray config.
+type ConfigIssue struct {
+	Tag    string `json:"tag"`
+	Reason string `json:"reason"`
+}
+
+func routingDomainStrategy() string {
+	v := strings.TrimSpace(database.GetSetting("routingDomainStrategy"))
+	switch v {
+	case "IPIfNonMatch", "IPOnDemand", "AsIs":
+		return v
+	default:
+		return "AsIs"
+	}
+}
+
+func inboundTag(in *model.Inbound) string {
+	if in.Tag != "" {
+		return in.Tag
+	}
+	return fmt.Sprintf("inbound-%d", in.ID)
+}
+
+func buildXrayInbound(in *model.Inbound) (map[string]any, *ConfigIssue) {
+	tag := inboundTag(in)
+	if in.Tag == "" {
+		in.Tag = tag
+	}
+	adap, err := protocol.Get(in.Protocol)
+	if err != nil || adap.Engine() != "xray" {
+		return nil, nil // not an xray inbound — not an issue
+	}
+	stream := protocol.ParseStream(in.StreamSettings)
+	if err := ValidateStreamSettings(stream); err != nil {
+		return nil, &ConfigIssue{Tag: tag, Reason: err.Error()}
+	}
+	obj, err := adap.ToXrayInbound(in, in.Clients)
+	if err != nil {
+		return nil, &ConfigIssue{Tag: tag, Reason: "ToXrayInbound: " + err.Error()}
+	}
+	return obj, nil
+}
+
+// ConfigIssues returns enabled inbounds that would be skipped when generating config.
+func (m *Manager) ConfigIssues() ([]ConfigIssue, error) {
+	var inbounds []model.Inbound
+	if err := database.DB.Preload("Clients").Where("enable = ?", true).Find(&inbounds).Error; err != nil {
+		return nil, err
+	}
+	issues := make([]ConfigIssue, 0)
+	for i := range inbounds {
+		_, issue := buildXrayInbound(&inbounds[i])
+		if issue != nil {
+			issues = append(issues, *issue)
+		}
+	}
+	return issues, nil
 }
 
 func splitCSV(s string) []string {
@@ -222,6 +285,38 @@ func (m *Manager) WriteConfig() error {
 	return nil
 }
 
+func (m *Manager) ProcessLogPath() string {
+	return filepath.Join(m.ConfigDir, "process.log")
+}
+
+func (m *Manager) AccessLogPath() string {
+	return filepath.Join(m.ConfigDir, "access.log")
+}
+
+func (m *Manager) ErrorLogPath() string {
+	return filepath.Join(m.ConfigDir, "error.log")
+}
+
+func (m *Manager) openProcessLog() (io.Writer, error) {
+	if err := os.MkdirAll(m.ConfigDir, 0o755); err != nil {
+		return nil, err
+	}
+	path := m.ProcessLogPath()
+	if info, err := os.Stat(path); err == nil && info.Size() > processLogMaxBytes {
+		_ = os.Truncate(path, 0)
+	}
+	if m.procLog != nil {
+		_ = m.procLog.Close()
+		m.procLog = nil
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	m.procLog = f
+	return io.MultiWriter(os.Stdout, f), nil
+}
+
 func (m *Manager) Start() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -231,7 +326,12 @@ func (m *Manager) Start() error {
 	if _, err := os.Stat(m.Bin); err != nil {
 		return fmt.Errorf("xray binary missing (%s): place xray in bin dir or set WE1B_XRAY_BIN", m.Bin)
 	}
+	logW, err := m.openProcessLog()
+	if err != nil {
+		return fmt.Errorf("open process.log: %w", err)
+	}
 	m.proc = supervisor.New("xray", m.Bin, "run", "-c", m.ConfigPath())
+	m.proc.SetLog(logW)
 	return m.proc.Start()
 }
 
@@ -241,7 +341,12 @@ func (m *Manager) Stop() error {
 	if m.proc == nil {
 		return nil
 	}
-	return m.proc.Stop()
+	err := m.proc.Stop()
+	if m.procLog != nil {
+		_ = m.procLog.Close()
+		m.procLog = nil
+	}
+	return err
 }
 
 func (m *Manager) Restart() error {

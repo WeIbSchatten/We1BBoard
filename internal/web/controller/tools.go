@@ -3,11 +3,15 @@ package controller
 import (
 	"crypto/ecdh"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -90,4 +94,74 @@ func (a *API) FetchSub(c *gin.Context) {
 		return
 	}
 	ok(c, gin.H{"body": string(body)})
+}
+
+// RealityScan dials TLS to target (host:port) with SNI=host and returns cert SANs.
+// POST /tools/reality-scan  body: { "target": "www.cloudflare.com:443" }
+func (a *API) RealityScan(c *gin.Context) {
+	var req struct {
+		Target string `json:"target" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	target := strings.TrimSpace(req.Target)
+	host, portStr, err := net.SplitHostPort(target)
+	if err != nil {
+		// allow bare host → :443
+		host = target
+		portStr = "443"
+		target = net.JoinHostPort(host, portStr)
+	}
+	host = strings.TrimSpace(host)
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port < 1 || port > 65535 {
+		ok(c, gin.H{"dest": target, "serverNames": []string{}, "ok": false, "error": "invalid port"})
+		return
+	}
+	if err := security.ValidateDialHost(host); err != nil {
+		ok(c, gin.H{"dest": target, "serverNames": []string{}, "ok": false, "error": err.Error()})
+		return
+	}
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	raw, err := dialer.Dial("tcp", addr)
+	if err != nil {
+		ok(c, gin.H{"dest": addr, "serverNames": []string{}, "ok": false, "error": err.Error()})
+		return
+	}
+	defer raw.Close()
+	_ = raw.SetDeadline(time.Now().Add(5 * time.Second))
+	tlsConn := tls.Client(raw, &tls.Config{
+		ServerName:         host,
+		InsecureSkipVerify: true, //nolint:gosec // probe only; we only read SANs
+		MinVersion:         tls.VersionTLS12,
+	})
+	if err := tlsConn.Handshake(); err != nil {
+		ok(c, gin.H{"dest": addr, "serverNames": []string{}, "ok": false, "error": err.Error()})
+		return
+	}
+	defer tlsConn.Close()
+	st := tlsConn.ConnectionState()
+	names := make([]string, 0)
+	seen := map[string]bool{}
+	add := func(n string) {
+		n = strings.TrimSpace(n)
+		if n == "" || strings.HasPrefix(n, "*.") || seen[n] {
+			return
+		}
+		seen[n] = true
+		names = append(names, n)
+	}
+	if len(st.PeerCertificates) > 0 {
+		leaf := st.PeerCertificates[0]
+		for _, n := range leaf.DNSNames {
+			add(n)
+		}
+		for _, ip := range leaf.IPAddresses {
+			add(ip.String())
+		}
+	}
+	ok(c, gin.H{"dest": addr, "serverNames": names, "ok": true})
 }

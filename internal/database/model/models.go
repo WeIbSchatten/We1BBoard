@@ -64,6 +64,7 @@ type Client struct {
 	Password   string    `gorm:"size:255" json:"password"`
 	Flow       string    `gorm:"size:64" json:"flow"`
 	SubID      string    `gorm:"size:64;index" json:"subId"`
+	LimitIP    int       `json:"limitIp"`
 	TotalGB    int64     `json:"totalGB"`
 	ExpiryTime int64     `json:"expiryTime"`
 	Up         int64     `json:"up"`

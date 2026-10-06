@@ -41,6 +41,7 @@ export type Client = {
   password: string
   flow: string
   subId: string
+  limitIp?: number
   totalGB: number
   expiryTime: number
   up: number

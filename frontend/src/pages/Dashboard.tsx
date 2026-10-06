@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../api'
 import { useApp } from '../AppContext'
 
@@ -72,7 +73,24 @@ export function DashboardPage() {
           <div className="hint">mtg / tuic / hy2 / tg</div>
         </div>
       </div>
+      {st && !st.xrayRunning && (
+        <div className="alert-warn" style={{ marginTop: 16 }}>
+          Xray {tr('stopped')}.{' '}
+          <Link to="/logs">{tr('logs')}</Link>
+        </div>
+      )}
       {msg && <p className="page-sub" style={{ marginTop: 14 }}>{msg}</p>}
+      <style>{`
+        .alert-warn {
+          padding: 0.85rem 1rem;
+          border-radius: 12px;
+          border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border));
+          background: color-mix(in srgb, var(--danger) 10%, transparent);
+          color: var(--text);
+          font-weight: 600;
+        }
+        .alert-warn a { color: var(--accent); }
+      `}</style>
     </div>
   )
 }

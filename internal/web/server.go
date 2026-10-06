@@ -109,6 +109,7 @@ func (s *Server) Start() error {
 			sess.POST("/password", api.ChangePassword)
 			sess.GET("/protocols", api.ListProtocols)
 			sess.GET("/tools/reality-keys", api.RealityKeys)
+			sess.POST("/tools/reality-scan", api.RealityScan)
 			sess.GET("/tools/uuid", api.RandomUUID)
 			sess.POST("/tools/fetch-sub", api.FetchSub)
 
@@ -116,10 +117,12 @@ func (s *Server) Start() error {
 			sess.POST("/inbounds", api.CreateInbound)
 			sess.PUT("/inbounds/:id", api.UpdateInbound)
 			sess.DELETE("/inbounds/:id", api.DeleteInbound)
+			sess.POST("/inbounds/disable-invalid", api.DisableInvalidInbounds)
 
 			sess.POST("/clients", api.CreateClient)
 			sess.PUT("/clients/:id", api.UpdateClient)
 			sess.DELETE("/clients/:id", api.DeleteClient)
+			sess.POST("/clients/:id/reset-traffic", api.ResetClientTraffic)
 			sess.GET("/clients/:id/link", api.ClientLink)
 			sess.GET("/clients/:id/qr", api.ClientQR)
 			sess.GET("/clients/:id/sub", api.ClientSub)
@@ -158,6 +161,8 @@ func (s *Server) Start() error {
 			sess.POST("/settings", api.UpdateSettings)
 
 			sess.GET("/xray/config", api.XrayConfig)
+			sess.GET("/xray/config-issues", api.XrayConfigIssues)
+			sess.GET("/xray/logs", api.XrayLogs)
 		}
 	}
 

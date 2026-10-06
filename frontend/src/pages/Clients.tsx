@@ -57,6 +57,11 @@ export function ClientsPage() {
     await load()
   }
 
+  async function resetTraffic(id: number) {
+    await api(`/clients/${id}/reset-traffic`, { method: 'POST' })
+    await load()
+  }
+
   async function showLink(c: Client) {
     const data = await api<{ link: string }>(`/clients/${c.id}/link`)
     setLink(data.link)
@@ -139,6 +144,7 @@ export function ClientsPage() {
                   <td className="row-actions">
                     <button className="btn secondary" onClick={() => showLink(c)}>{tr('link')}</button>
                     <button className="btn secondary" onClick={() => showSub(c)}>{tr('subscription')}</button>
+                    <button className="btn secondary" onClick={() => { void resetTraffic(c.id) }}>{tr('resetTraffic')}</button>
                     <button className="btn secondary" onClick={() => setModal({ open: true, mode: 'edit', inbound: ib, client: c })}>{tr('edit')}</button>
                     <button className="btn danger" onClick={() => remove(c.id)}>{tr('delete')}</button>
                   </td>

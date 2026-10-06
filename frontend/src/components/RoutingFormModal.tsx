@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { api, type Inbound, type Outbound } from '../api'
 import { useApp } from '../AppContext'
+import { appendCsv, csvHas, DOMAIN_CHIPS, IP_CHIPS } from '../lib/routingChips'
 
 export type RoutingRule = {
   id: number
@@ -120,13 +121,37 @@ export function RoutingFormModal({ open, mode, rule, inbounds, outbounds, onClos
               {outboundTags.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
-          <div className="field">
+          <div className="field" style={{ gridColumn: '1 / -1' }}>
             <label className="label">Domain (csv / geosite:)</label>
             <input className="input" value={form.domain} onChange={(e) => setForm({ ...form, domain: e.target.value })} placeholder="geosite:google, domain:example.com" />
+            <div className="chip-row">
+              {DOMAIN_CHIPS.map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  className={`chip${csvHas(form.domain, v) ? ' active' : ''}`}
+                  onClick={() => setForm({ ...form, domain: appendCsv(form.domain, v) })}
+                >
+                  {v}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="field">
+          <div className="field" style={{ gridColumn: '1 / -1' }}>
             <label className="label">IP (csv / geoip:)</label>
             <input className="input" value={form.ip} onChange={(e) => setForm({ ...form, ip: e.target.value })} placeholder="geoip:cn, 1.1.1.1/32" />
+            <div className="chip-row">
+              {IP_CHIPS.map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  className={`chip${csvHas(form.ip, v) ? ' active' : ''}`}
+                  onClick={() => setForm({ ...form, ip: appendCsv(form.ip, v) })}
+                >
+                  {v}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="field">
             <label className="label">Port</label>

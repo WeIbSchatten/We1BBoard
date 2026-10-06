@@ -48,6 +48,17 @@ export function InboundsPage() {
     await load()
   }
 
+  async function resetTraffic(id: number) {
+    await api(`/clients/${id}/reset-traffic`, { method: 'POST' })
+    await load()
+  }
+
+  async function disableInvalid() {
+    const res = await api<{ count: number }>('/inbounds/disable-invalid', { method: 'POST' })
+    alert(`${tr('disabledCount')}: ${res.count}`)
+    await load()
+  }
+
   async function showLink(client?: Client) {
     if (!client) return
     const data = await api<{ link: string }>(`/clients/${client.id}/link`)
@@ -87,9 +98,14 @@ export function InboundsPage() {
           <h1 className="page-title">{tr('inbounds')}</h1>
           <p className="page-sub">{tr('inboundsHint')}</p>
         </div>
-        <button className="btn" onClick={() => setInboundModal({ open: true, mode: 'add', inbound: null })}>
-          {tr('create')}
-        </button>
+        <div className="row-actions">
+          <button className="btn secondary" type="button" onClick={() => { void disableInvalid() }}>
+            {tr('disableInvalidInbounds')}
+          </button>
+          <button className="btn" onClick={() => setInboundModal({ open: true, mode: 'add', inbound: null })}>
+            {tr('create')}
+          </button>
+        </div>
       </div>
 
       <div className="card">
@@ -184,6 +200,7 @@ export function InboundsPage() {
                                   <td className="row-actions">
                                     <button className="btn secondary" onClick={() => showLink(c)}>{tr('link')}</button>
                                     <button className="btn secondary" onClick={() => showSub(c)}>{tr('subscription')}</button>
+                                    <button className="btn secondary" onClick={() => { void resetTraffic(c.id) }}>{tr('resetTraffic')}</button>
                                     <button className="btn secondary" onClick={() => setClientModal({ open: true, mode: 'edit', inbound: r, client: c })}>{tr('edit')}</button>
                                     <button className="btn danger" onClick={() => removeClient(c.id)}>{tr('delete')}</button>
                                   </td>
