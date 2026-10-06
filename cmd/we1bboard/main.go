@@ -13,6 +13,7 @@ import (
 	"github.com/we1bboard/we1bboard/internal/config"
 	"github.com/we1bboard/we1bboard/internal/database"
 	"github.com/we1bboard/we1bboard/internal/extra"
+	"github.com/we1bboard/we1bboard/internal/panellog"
 	"github.com/we1bboard/we1bboard/internal/tgproxy"
 	"github.com/we1bboard/we1bboard/internal/ufw"
 	"github.com/we1bboard/we1bboard/internal/web"
@@ -58,8 +59,11 @@ func runServer() {
 	cfg := config.Load()
 	_ = os.MkdirAll(cfg.DataDir, 0o755)
 	_ = os.MkdirAll(cfg.BinDir, 0o755)
+	panellog.Init(cfg.DataDir)
+	panellog.Append("panel starting v%s", config.Version)
 	if err := database.Init(cfg); err != nil {
 		fmt.Println("db error:", err)
+		panellog.Append("db init failed: %v", err)
 		os.Exit(1)
 	}
 	xrayMgr := xray.NewManager(cfg.XrayBin, filepath.Join(cfg.DataDir, "xray"))

@@ -16,6 +16,8 @@ import {
   buildStreamSettings,
   emptyInboundForm,
   parseInboundToForm,
+  protocolNeedsStream,
+  randomAwgObfuscation,
   randomSS2022Password,
 } from '../lib/inboundForm'
 import { randomLowerAndNum, randomShortIds, randomSpiderX } from '../lib/random'
@@ -60,9 +62,24 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
           next.ssMethod = '2022-blake3-aes-256-gcm'
           next.ssPassword = randomSS2022Password(next.ssMethod)
         }
-        if (['tun', 'tunnel', 'mtproto', 'tuic', 'hysteria2'].includes(String(value))) {
+        if (['tun', 'tunnel', 'mtproto', 'tuic', 'hysteria2', 'wireguard', 'amneziawg'].includes(String(value))) {
           next.network = 'tcp'
           next.security = 'none'
+        }
+        if (value === 'amneziawg' || value === 'wireguard') {
+          Object.assign(next, randomAwgObfuscation())
+          next.wgAddress = '10.0.0.1/24'
+          next.wgMtu = 1420
+          queueMicrotask(() => { void genWgKeys() })
+        }
+        if (value === 'mtproto') {
+          next.mtprotoFakeTlsDomain = 'www.cloudflare.com'
+        }
+        if (value === 'tuic') {
+          next.tuicCongestion = 'bbr'
+        }
+        if (value === 'hysteria2') {
+          next.hy2Password = randomLowerAndNum(16)
         }
       }
       if (key === 'ssMethod') {
@@ -92,6 +109,18 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
       }))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'keys error')
+    }
+  }
+
+  async function genWgKeys() {
+    try {
+      const keys = await api<{ secretKey: string; privateKey: string; publicKey: string }>('/tools/wireguard-keys')
+      setForm((prev) => ({
+        ...prev,
+        wgSecretKey: keys.secretKey || keys.privateKey,
+      }))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'wg keys error')
     }
   }
 
@@ -125,7 +154,7 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
     setError('')
     setBusy(true)
     try {
-      if (form.security === 'tls') {
+      if (form.security === 'tls' && protocolNeedsStream(form.protocol)) {
         const hasFiles = form.tlsCertFile.trim() && form.tlsKeyFile.trim()
         const hasContent = form.tlsCertContent.trim() && form.tlsKeyContent.trim()
         if (!hasFiles && !hasContent) {
@@ -140,6 +169,9 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
       }
       if (form.security === 'reality' && !form.realitySNI) {
         throw new Error('REALITY serverNames (SNI) is required')
+      }
+      if ((form.protocol === 'wireguard' || form.protocol === 'amneziawg') && !form.wgSecretKey.trim()) {
+        throw new Error('Generate WireGuard secretKey first')
       }
       const payload = {
         remark: form.remark,
@@ -168,14 +200,16 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
 
   if (!open) return null
 
-  const needsStream = !['tun', 'tunnel', 'mtproto', 'tuic', 'hysteria2'].includes(form.protocol)
+  const needsStream = protocolNeedsStream(form.protocol)
   const showFallbacks = form.protocol === 'vless' || form.protocol === 'trojan'
+  const showAdvanced = showFallbacks || needsStream
+  const isWg = form.protocol === 'wireguard' || form.protocol === 'amneziawg'
   const tabs: { id: Tab; label: string; show?: boolean }[] = [
     { id: 'general', label: tr('tabGeneral') },
     { id: 'network', label: tr('tabNetwork'), show: needsStream },
     { id: 'security', label: tr('tabSecurity'), show: needsStream },
     { id: 'sniffing', label: tr('tabSniffing'), show: needsStream },
-    { id: 'advanced', label: 'Advanced', show: showFallbacks },
+    { id: 'advanced', label: 'Advanced', show: showAdvanced },
   ]
 
   return (
@@ -227,6 +261,80 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
                   </div>
                 </div>
               </>
+            )}
+            {isWg && (
+              <>
+                <div className="field" style={{ gridColumn: '1 / -1' }}>
+                  <label className="label">Secret key</label>
+                  <div className="row-actions">
+                    <input className="input" value={form.wgSecretKey} onChange={(e) => set('wgSecretKey', e.target.value)} />
+                    <button type="button" className="btn secondary" onClick={() => { void genWgKeys() }}>↻</button>
+                  </div>
+                </div>
+                <div className="field">
+                  <label className="label">Address</label>
+                  <input className="input" value={form.wgAddress} onChange={(e) => set('wgAddress', e.target.value)} placeholder="10.0.0.1/24" />
+                </div>
+                <div className="field">
+                  <label className="label">MTU</label>
+                  <input className="input" type="number" min={576} max={65535} value={form.wgMtu} onChange={(e) => set('wgMtu', Number(e.target.value))} />
+                </div>
+                <p className="page-sub" style={{ gridColumn: '1 / -1', margin: 0 }}>Peers are empty — panel clients can be mapped as peers later.</p>
+              </>
+            )}
+            {form.protocol === 'amneziawg' && (
+              <>
+                <div className="row-actions" style={{ gridColumn: '1 / -1' }}>
+                  <button type="button" className="btn secondary" onClick={() => setForm((prev) => ({ ...prev, ...randomAwgObfuscation() }))}>
+                    Regenerate obfuscation
+                  </button>
+                </div>
+                <div className="field"><label className="label">Jc</label><input className="input" type="number" value={form.awgJc} onChange={(e) => set('awgJc', Number(e.target.value))} /></div>
+                <div className="field"><label className="label">Jmin</label><input className="input" type="number" value={form.awgJmin} onChange={(e) => set('awgJmin', Number(e.target.value))} /></div>
+                <div className="field"><label className="label">Jmax</label><input className="input" type="number" value={form.awgJmax} onChange={(e) => set('awgJmax', Number(e.target.value))} /></div>
+                <div className="field"><label className="label">S1</label><input className="input" type="number" value={form.awgS1} onChange={(e) => set('awgS1', Number(e.target.value))} /></div>
+                <div className="field"><label className="label">S2</label><input className="input" type="number" value={form.awgS2} onChange={(e) => set('awgS2', Number(e.target.value))} /></div>
+                <div className="field"><label className="label">H1</label><input className="input" value={form.awgH1} onChange={(e) => set('awgH1', e.target.value)} /></div>
+                <div className="field"><label className="label">H2</label><input className="input" value={form.awgH2} onChange={(e) => set('awgH2', e.target.value)} /></div>
+                <div className="field"><label className="label">H3</label><input className="input" value={form.awgH3} onChange={(e) => set('awgH3', e.target.value)} /></div>
+                <div className="field"><label className="label">H4</label><input className="input" value={form.awgH4} onChange={(e) => set('awgH4', e.target.value)} /></div>
+              </>
+            )}
+            {form.protocol === 'tuic' && (
+              <>
+                <div className="field">
+                  <label className="label">Congestion control</label>
+                  <select className="select" value={form.tuicCongestion} onChange={(e) => set('tuicCongestion', e.target.value)}>
+                    <option value="bbr">bbr</option>
+                    <option value="cubic">cubic</option>
+                    <option value="new_reno">new_reno</option>
+                  </select>
+                </div>
+                <p className="page-sub" style={{ gridColumn: '1 / -1', margin: 0 }}>Users list starts empty — panel clients may not map to TUIC users yet.</p>
+              </>
+            )}
+            {form.protocol === 'hysteria2' && (
+              <>
+                <div className="field">
+                  <label className="label">{tr('password')}</label>
+                  <div className="row-actions">
+                    <input className="input" value={form.hy2Password} onChange={(e) => set('hy2Password', e.target.value)} />
+                    <button type="button" className="btn secondary" onClick={() => set('hy2Password', randomLowerAndNum(16))}>↻</button>
+                  </div>
+                </div>
+                <p className="page-sub" style={{ gridColumn: '1 / -1', margin: 0 }}>Users list starts empty — panel clients may not map to Hysteria2 users yet.</p>
+              </>
+            )}
+            {form.protocol === 'mtproto' && (
+              <div className="field" style={{ gridColumn: '1 / -1' }}>
+                <label className="label">Fake TLS domain</label>
+                <input className="input" value={form.mtprotoFakeTlsDomain} onChange={(e) => set('mtprotoFakeTlsDomain', e.target.value)} placeholder="www.cloudflare.com" />
+              </div>
+            )}
+            {(form.protocol === 'http' || form.protocol === 'socks') && (
+              <p className="page-sub" style={{ gridColumn: '1 / -1', margin: 0 }}>
+                Clients on this inbound become {form.protocol.toUpperCase()} accounts (user/pass).
+              </p>
             )}
             <div className="field">
               <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -423,17 +531,34 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
           </div>
         )}
 
-        {tab === 'advanced' && showFallbacks && (
-          <div className="field">
-            <label className="label">Fallbacks (JSON array)</label>
-            <textarea
-              className="input"
-              rows={10}
-              value={form.fallbacksJSON}
-              onChange={(e) => set('fallbacksJSON', e.target.value)}
-              placeholder='[{"dest":"80","xver":0}]'
-              style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: '0.85rem' }}
-            />
+        {tab === 'advanced' && showAdvanced && (
+          <div className="grid2">
+            {showFallbacks && (
+              <div className="field" style={{ gridColumn: '1 / -1' }}>
+                <label className="label">Fallbacks (JSON array)</label>
+                <textarea
+                  className="input"
+                  rows={8}
+                  value={form.fallbacksJSON}
+                  onChange={(e) => set('fallbacksJSON', e.target.value)}
+                  placeholder='[{"dest":"80","xver":0}]'
+                  style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: '0.85rem' }}
+                />
+              </div>
+            )}
+            {needsStream && (
+              <div className="field" style={{ gridColumn: '1 / -1' }}>
+                <label className="label">Sockopt (JSON object, optional)</label>
+                <textarea
+                  className="input"
+                  rows={6}
+                  value={form.sockoptJSON}
+                  onChange={(e) => set('sockoptJSON', e.target.value)}
+                  placeholder='{"tcpFastOpen":true}'
+                  style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: '0.85rem' }}
+                />
+              </div>
+            )}
           </div>
         )}
 

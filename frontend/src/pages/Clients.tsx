@@ -2,10 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, type Client, type Inbound } from '../api'
 import { useApp } from '../AppContext'
 import { ClientBulkAddModal } from '../components/ClientBulkAddModal'
+import { ClientBulkAdjustModal } from '../components/ClientBulkAdjustModal'
+import { ClientBulkAttachModal } from '../components/ClientBulkAttachModal'
 import { ClientFormModal } from '../components/ClientFormModal'
 import { inboundSupportsClients } from '../lib/inboundForm'
 
-type ClientRow = Client & { inboundRemark?: string; inboundProtocol?: string; inboundPort?: number }
+type ClientRow = Client & { inboundRemark?: string; inboundProtocol?: string; inboundPort?: number; inboundCount?: number }
 
 export function ClientsPage() {
   const { tr } = useApp()
@@ -15,6 +17,8 @@ export function ClientsPage() {
     open: false, mode: 'add', inbound: null, client: null,
   })
   const [bulkOpen, setBulkOpen] = useState(false)
+  const [attachOpen, setAttachOpen] = useState(false)
+  const [adjustOpen, setAdjustOpen] = useState(false)
   const [link, setLink] = useState('')
   const [subUrls, setSubUrls] = useState<Record<string, string> | null>(null)
   const [qrClientId, setQrClientId] = useState<number | null>(null)
@@ -31,21 +35,29 @@ export function ClientsPage() {
   )
 
   const rows: ClientRow[] = useMemo(() => {
-    const list: ClientRow[] = []
+    const byId = new Map<number, ClientRow>()
     for (const ib of inbounds) {
       for (const c of ib.clients || []) {
-        list.push({
+        const existing = byId.get(c.id)
+        if (existing) {
+          existing.inboundCount = (existing.inboundCount || 1) + 1
+          continue
+        }
+        const primary = inbounds.find((i) => i.id === c.inboundId) || ib
+        byId.set(c.id, {
           ...c,
-          inboundRemark: ib.remark || ib.tag,
-          inboundProtocol: ib.protocol,
-          inboundPort: ib.port,
+          inboundRemark: primary.remark || primary.tag,
+          inboundProtocol: primary.protocol,
+          inboundPort: primary.port,
+          inboundCount: (c.inboundIds || String(c.inboundId || '')).split(',').filter(Boolean).length || 1,
         })
       }
     }
+    const list = [...byId.values()]
     const q = filter.trim().toLowerCase()
     if (!q) return list
     return list.filter((c) =>
-      [c.email, c.uuid, c.subId, c.comment, c.inboundRemark, c.inboundProtocol]
+      [c.email, c.uuid, c.subId, c.comment, c.inboundRemark, c.inboundProtocol, c.inboundIds]
         .filter(Boolean)
         .some((v) => String(v).toLowerCase().includes(q)),
     )
@@ -95,6 +107,8 @@ export function ClientsPage() {
           <p className="page-sub">{tr('clientsHint')}</p>
         </div>
         <div className="row-actions">
+          <button className="btn secondary" onClick={() => setAttachOpen(true)} disabled={rows.length === 0}>{tr('bulkAttach')}</button>
+          <button className="btn secondary" onClick={() => setAdjustOpen(true)} disabled={rows.length === 0}>{tr('bulkAdjust')}</button>
           <button className="btn secondary" onClick={() => setBulkOpen(true)} disabled={clientInbounds.length === 0}>{tr('bulkAdd')}</button>
           <button
             className="btn"
@@ -129,14 +143,13 @@ export function ClientsPage() {
           </thead>
           <tbody>
             {rows.length === 0 && <tr><td colSpan={6}>{tr('empty')}</td></tr>}
-            {rows.map((c) => {
-              const ib = inbounds.find((i) => i.id === c.inboundId) || null
-              return (
+            {rows.map((c) => (
                 <tr key={c.id}>
                   <td>{c.email}</td>
                   <td>
                     <span className="badge">{c.inboundProtocol}</span>{' '}
                     {c.inboundRemark}:{c.inboundPort}
+                    {(c.inboundCount || 1) > 1 && <span className="badge" style={{ marginLeft: 4 }}>+{c.inboundCount! - 1}</span>}
                   </td>
                   <td><code style={{ fontFamily: 'var(--mono)', fontSize: '0.8rem' }}>{c.uuid?.slice(0, 8)}…</code></td>
                   <td>{traffic(c)}</td>
@@ -145,12 +158,11 @@ export function ClientsPage() {
                     <button className="btn secondary" onClick={() => showLink(c)}>{tr('link')}</button>
                     <button className="btn secondary" onClick={() => showSub(c)}>{tr('subscription')}</button>
                     <button className="btn secondary" onClick={() => { void resetTraffic(c.id) }}>{tr('resetTraffic')}</button>
-                    <button className="btn secondary" onClick={() => setModal({ open: true, mode: 'edit', inbound: ib, client: c })}>{tr('edit')}</button>
+                    <button className="btn secondary" onClick={() => setModal({ open: true, mode: 'edit', inbound: null, client: c })}>{tr('edit')}</button>
                     <button className="btn danger" onClick={() => remove(c.id)}>{tr('delete')}</button>
                   </td>
                 </tr>
-              )
-            })}
+              ))}
           </tbody>
         </table>
       </div>
@@ -188,6 +200,19 @@ export function ClientsPage() {
         open={bulkOpen}
         inbounds={clientInbounds}
         onClose={() => setBulkOpen(false)}
+        onSaved={() => { void load() }}
+      />
+      <ClientBulkAttachModal
+        open={attachOpen}
+        clients={rows}
+        inbounds={clientInbounds}
+        onClose={() => setAttachOpen(false)}
+        onSaved={() => { void load() }}
+      />
+      <ClientBulkAdjustModal
+        open={adjustOpen}
+        clients={rows}
+        onClose={() => setAdjustOpen(false)}
         onSaved={() => { void load() }}
       />
     </div>

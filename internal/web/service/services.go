@@ -2,7 +2,9 @@ package service
 
 import (
 	"fmt"
+	"math/rand"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/we1bboard/we1bboard/internal/database"
@@ -21,16 +23,42 @@ type InboundService struct {
 
 func (s *InboundService) List() ([]model.Inbound, error) {
 	var rows []model.Inbound
-	err := database.DB.Preload("Clients").Order("id desc").Find(&rows).Error
-	return rows, err
+	if err := database.DB.Order("id desc").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	attachClientsByMembership(rows)
+	return rows, nil
 }
 
 func (s *InboundService) Get(id uint) (*model.Inbound, error) {
 	var in model.Inbound
-	if err := database.DB.Preload("Clients").First(&in, id).Error; err != nil {
+	if err := database.DB.First(&in, id).Error; err != nil {
 		return nil, err
 	}
+	rows := []model.Inbound{in}
+	attachClientsByMembership(rows)
+	in = rows[0]
 	return &in, nil
+}
+
+// attachClientsByMembership fills Clients for each inbound where InboundID==id or inboundIds contains id.
+func attachClientsByMembership(inbounds []model.Inbound) {
+	if len(inbounds) == 0 {
+		return
+	}
+	var clients []model.Client
+	if err := database.DB.Find(&clients).Error; err != nil {
+		return
+	}
+	byID := map[uint][]model.Client{}
+	for _, c := range clients {
+		for _, iid := range model.ParseInboundIDList(&c) {
+			byID[iid] = append(byID[iid], c)
+		}
+	}
+	for i := range inbounds {
+		inbounds[i].Clients = byID[inbounds[i].ID]
+	}
 }
 
 func (s *InboundService) Create(in *model.Inbound) error {
@@ -122,14 +150,101 @@ func (s *InboundService) Delete(id uint) error {
 		return err
 	}
 	ufw.SyncInbound(in, true)
-	if err := database.DB.Where("inbound_id = ?", id).Delete(&model.Client{}).Error; err != nil {
-		return err
+
+	var clients []model.Client
+	_ = database.DB.Find(&clients).Error
+	for _, c := range clients {
+		ids := model.ParseInboundIDList(&c)
+		belongs := false
+		remaining := make([]uint, 0, len(ids))
+		for _, iid := range ids {
+			if iid == id {
+				belongs = true
+				continue
+			}
+			remaining = append(remaining, iid)
+		}
+		if !belongs {
+			continue
+		}
+		if len(remaining) == 0 {
+			_ = database.DB.Delete(&model.Client{}, c.ID).Error
+			continue
+		}
+		model.NormalizeInboundIDs(&c, remaining)
+		_ = database.DB.Model(&c).Updates(map[string]any{
+			"inbound_id":  c.InboundID,
+			"inbound_ids": c.InboundIDs,
+		}).Error
 	}
+
 	if err := database.DB.Delete(&model.Inbound{}, id).Error; err != nil {
 		return err
 	}
 	_ = s.RT.ForNode(in.NodeID).Reload()
 	return nil
+}
+
+// Clone copies an inbound without clients, assigns a free random port, and appends " (copy)" to remark.
+func (s *InboundService) Clone(id uint) (*model.Inbound, error) {
+	src, err := s.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	port, err := freeInboundPort(src.Port)
+	if err != nil {
+		return nil, err
+	}
+	remark := strings.TrimSpace(src.Remark)
+	if remark == "" {
+		remark = src.Tag
+	}
+	if remark == "" {
+		remark = string(src.Protocol)
+	}
+	if !strings.HasSuffix(remark, " (copy)") {
+		remark = remark + " (copy)"
+	}
+	tag := fmt.Sprintf("inbound-%s-%d", src.Protocol, port)
+	clone := &model.Inbound{
+		Remark:         remark,
+		Enable:         src.Enable,
+		Listen:         src.Listen,
+		Port:           port,
+		Protocol:       src.Protocol,
+		Settings:       src.Settings,
+		StreamSettings: src.StreamSettings,
+		Sniffing:       src.Sniffing,
+		Tag:            tag,
+		NodeID:         src.NodeID,
+		Total:          src.Total,
+		ExpiryTime:     src.ExpiryTime,
+	}
+	if err := s.Create(clone); err != nil {
+		return nil, err
+	}
+	return clone, nil
+}
+
+func freeInboundPort(prefer int) (int, error) {
+	used := map[int]bool{}
+	var ports []int
+	_ = database.DB.Model(&model.Inbound{}).Pluck("port", &ports).Error
+	for _, p := range ports {
+		used[p] = true
+	}
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	for try := 0; try < 200; try++ {
+		p := prefer
+		if try > 0 || used[p] {
+			p = 10000 + rng.Intn(50000)
+		}
+		if p < 1 || p > 65535 || used[p] {
+			continue
+		}
+		return p, nil
+	}
+	return 0, fmt.Errorf("could not find a free inbound port")
 }
 
 // DisableInvalid finds enabled Xray inbounds that fail stream validation, sets enable=false, reloads.
@@ -163,18 +278,67 @@ type ClientService struct {
 	RT *runtime.Hub
 }
 
-func (s *ClientService) Create(c *model.Client) error {
-	if c.InboundID == 0 {
+func clientProtocolsOK(proto model.Protocol) error {
+	switch proto {
+	case model.ProtoWireGuard, model.ProtoAmneziaWG, model.ProtoTunnel, model.ProtoTUN,
+		model.ProtoMTProto, model.ProtoTUIC, model.ProtoHysteria2:
+		return fmt.Errorf("clients are not supported for protocol %s", proto)
+	}
+	return nil
+}
+
+func (s *ClientService) resolveInboundIDs(c *model.Client) error {
+	ids := model.ParseInboundIDsCSV(c.InboundIDs)
+	if len(ids) == 0 && c.InboundID != 0 {
+		ids = []uint{c.InboundID}
+	}
+	if len(ids) == 0 {
 		return fmt.Errorf("inboundId required")
+	}
+	for _, id := range ids {
+		var in model.Inbound
+		if err := database.DB.First(&in, id).Error; err != nil {
+			return fmt.Errorf("inbound %d not found", id)
+		}
+		if err := clientProtocolsOK(in.Protocol); err != nil {
+			return err
+		}
+	}
+	model.NormalizeInboundIDs(c, ids)
+	c.TrafficReset = model.NormalizeTrafficReset(c.TrafficReset)
+	return nil
+}
+
+func (s *ClientService) reloadForClient(c *model.Client) error {
+	seen := map[uint]bool{}
+	var lastErr error
+	for _, id := range model.ParseInboundIDList(c) {
+		var in model.Inbound
+		if err := database.DB.First(&in, id).Error; err != nil {
+			continue
+		}
+		key := uint(0)
+		if in.NodeID != nil {
+			key = *in.NodeID
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		if err := s.RT.ForNode(in.NodeID).Reload(); err != nil {
+			lastErr = err
+		}
+	}
+	return lastErr
+}
+
+func (s *ClientService) Create(c *model.Client) error {
+	if err := s.resolveInboundIDs(c); err != nil {
+		return err
 	}
 	var in model.Inbound
 	if err := database.DB.First(&in, c.InboundID).Error; err != nil {
 		return fmt.Errorf("inbound not found")
-	}
-	switch in.Protocol {
-	case model.ProtoWireGuard, model.ProtoAmneziaWG, model.ProtoTunnel, model.ProtoTUN,
-		model.ProtoMTProto, model.ProtoTUIC, model.ProtoHysteria2:
-		return fmt.Errorf("clients are not supported for protocol %s", in.Protocol)
 	}
 	if c.UUID == "" {
 		c.UUID = uuid.NewString()
@@ -200,7 +364,7 @@ func (s *ClientService) Create(c *model.Client) error {
 	if err := database.DB.Create(c).Error; err != nil {
 		return err
 	}
-	if err := s.RT.ForNode(in.NodeID).Reload(); err != nil {
+	if err := s.reloadForClient(c); err != nil {
 		return fmt.Errorf("client saved but xray reload failed: %w", err)
 	}
 	return nil
@@ -217,8 +381,12 @@ func (s *ClientService) Update(c *model.Client) error {
 	if c.SubID != "" && !sub.ValidSubID(c.SubID) {
 		return fmt.Errorf("invalid subId (16-64 alphanumeric/_/-)")
 	}
-	if c.InboundID == 0 {
+	if strings.TrimSpace(c.InboundIDs) == "" && c.InboundID == 0 {
 		c.InboundID = old.InboundID
+		c.InboundIDs = old.InboundIDs
+	}
+	if err := s.resolveInboundIDs(c); err != nil {
+		return err
 	}
 	c.Up = old.Up
 	c.Down = old.Down
@@ -226,11 +394,10 @@ func (s *ClientService) Update(c *model.Client) error {
 	if err := database.DB.Save(c).Error; err != nil {
 		return err
 	}
-	var in model.Inbound
-	_ = database.DB.First(&in, c.InboundID)
-	if err := s.RT.ForNode(in.NodeID).Reload(); err != nil {
+	if err := s.reloadForClient(c); err != nil {
 		return fmt.Errorf("client updated but xray reload failed: %w", err)
 	}
+	_ = s.reloadForClient(&old) // also reload previous inbounds if detached
 	return nil
 }
 
@@ -242,9 +409,7 @@ func (s *ClientService) Delete(id uint) error {
 	if err := database.DB.Delete(&c).Error; err != nil {
 		return err
 	}
-	var in model.Inbound
-	_ = database.DB.First(&in, c.InboundID)
-	_ = s.RT.ForNode(in.NodeID).Reload()
+	_ = s.reloadForClient(&c)
 	return nil
 }
 
@@ -258,6 +423,82 @@ func (s *ClientService) ResetTraffic(id uint) error {
 		return fmt.Errorf("client not found")
 	}
 	return nil
+}
+
+// BulkAdjust adds days to expiry and/or GB to totalGB for selected clients.
+func (s *ClientService) BulkAdjust(ids []uint, addDays int, addGB int64) (int, error) {
+	if len(ids) == 0 {
+		return 0, fmt.Errorf("ids required")
+	}
+	var clients []model.Client
+	if err := database.DB.Where("id IN ?", ids).Find(&clients).Error; err != nil {
+		return 0, err
+	}
+	now := time.Now().UnixMilli()
+	n := 0
+	for i := range clients {
+		c := &clients[i]
+		updates := map[string]any{}
+		if addDays != 0 {
+			base := c.ExpiryTime
+			if base <= 0 || base < now {
+				base = now
+			}
+			updates["expiry_time"] = base + int64(addDays)*86400000
+		}
+		if addGB != 0 {
+			next := c.TotalGB + addGB
+			if next < 0 {
+				next = 0
+			}
+			updates["total_gb"] = next
+		}
+		if len(updates) == 0 {
+			continue
+		}
+		if err := database.DB.Model(c).Updates(updates).Error; err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
+// BulkAttach sets inboundIds (csv membership) for selected clients.
+func (s *ClientService) BulkAttach(ids []uint, inboundIDs []uint) (int, error) {
+	if len(ids) == 0 {
+		return 0, fmt.Errorf("ids required")
+	}
+	if len(inboundIDs) == 0 {
+		return 0, fmt.Errorf("inboundIds required")
+	}
+	for _, iid := range inboundIDs {
+		var in model.Inbound
+		if err := database.DB.First(&in, iid).Error; err != nil {
+			return 0, fmt.Errorf("inbound %d not found", iid)
+		}
+		if err := clientProtocolsOK(in.Protocol); err != nil {
+			return 0, err
+		}
+	}
+	var clients []model.Client
+	if err := database.DB.Where("id IN ?", ids).Find(&clients).Error; err != nil {
+		return 0, err
+	}
+	n := 0
+	for i := range clients {
+		c := &clients[i]
+		model.NormalizeInboundIDs(c, inboundIDs)
+		if err := database.DB.Model(c).Updates(map[string]any{
+			"inbound_id":  c.InboundID,
+			"inbound_ids": c.InboundIDs,
+		}).Error; err != nil {
+			return n, err
+		}
+		_ = s.reloadForClient(c)
+		n++
+	}
+	return n, nil
 }
 
 func (s *ClientService) ShareLink(id uint, host string) (string, error) {

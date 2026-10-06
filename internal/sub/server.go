@@ -120,7 +120,9 @@ func (s *Server) resolve(subID string) ([]subEntry, error) {
 	}
 	ids := map[uint]bool{}
 	for _, c := range clients {
-		ids[c.InboundID] = true
+		for _, iid := range model.ParseInboundIDList(&c) {
+			ids[iid] = true
+		}
 	}
 	idList := make([]uint, 0, len(ids))
 	for id := range ids {
@@ -137,25 +139,46 @@ func (s *Server) resolve(subID string) ([]subEntry, error) {
 		}
 	}
 	host := s.host()
-	out := make([]subEntry, 0, len(clients))
+	out := make([]subEntry, 0, len(clients)*2)
+	seenExtra := map[string]bool{}
 	for _, cl := range clients {
-		in, ok := imap[cl.InboundID]
-		if !ok {
-			continue
+		for _, iid := range model.ParseInboundIDList(&cl) {
+			in, ok := imap[iid]
+			if !ok {
+				continue
+			}
+			adap, err := protocol.Get(in.Protocol)
+			if err != nil {
+				continue
+			}
+			link, err := adap.ShareLink(&in, cl, host)
+			if err != nil {
+				continue
+			}
+			name := cl.Email
+			if name == "" {
+				name = fmt.Sprintf("%s-%d", in.Protocol, cl.ID)
+			}
+			if len(model.ParseInboundIDList(&cl)) > 1 {
+				name = fmt.Sprintf("%s [%s]", name, in.Remark)
+				if in.Remark == "" {
+					name = fmt.Sprintf("%s [%s:%d]", cl.Email, in.Protocol, in.Port)
+				}
+			}
+			out = append(out, subEntry{Client: cl, Inbound: in, Link: link, Name: name})
 		}
-		adap, err := protocol.Get(in.Protocol)
-		if err != nil {
-			continue
+		for _, extra := range model.ExtraLinkLines(cl.ExtraLinks) {
+			if seenExtra[extra] {
+				continue
+			}
+			seenExtra[extra] = true
+			out = append(out, subEntry{
+				Client:  cl,
+				Inbound: model.Inbound{Protocol: "extra", Remark: "extra"},
+				Link:    extra,
+				Name:    "extra",
+			})
 		}
-		link, err := adap.ShareLink(&in, cl, host)
-		if err != nil {
-			continue
-		}
-		name := cl.Email
-		if name == "" {
-			name = fmt.Sprintf("%s-%d", in.Protocol, cl.ID)
-		}
-		out = append(out, subEntry{Client: cl, Inbound: in, Link: link, Name: name})
 	}
 	return out, nil
 }

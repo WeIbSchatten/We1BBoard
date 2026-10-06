@@ -109,6 +109,7 @@ func (s *Server) Start() error {
 			sess.POST("/password", api.ChangePassword)
 			sess.GET("/protocols", api.ListProtocols)
 			sess.GET("/tools/reality-keys", api.RealityKeys)
+			sess.GET("/tools/wireguard-keys", api.WireGuardKeys)
 			sess.POST("/tools/reality-scan", api.RealityScan)
 			sess.GET("/tools/uuid", api.RandomUUID)
 			sess.POST("/tools/fetch-sub", api.FetchSub)
@@ -117,9 +118,12 @@ func (s *Server) Start() error {
 			sess.POST("/inbounds", api.CreateInbound)
 			sess.PUT("/inbounds/:id", api.UpdateInbound)
 			sess.DELETE("/inbounds/:id", api.DeleteInbound)
+			sess.POST("/inbounds/:id/clone", api.CloneInbound)
 			sess.POST("/inbounds/disable-invalid", api.DisableInvalidInbounds)
 
 			sess.POST("/clients", api.CreateClient)
+			sess.POST("/clients/bulk-adjust", api.BulkAdjustClients)
+			sess.POST("/clients/bulk-attach", api.BulkAttachClients)
 			sess.PUT("/clients/:id", api.UpdateClient)
 			sess.DELETE("/clients/:id", api.DeleteClient)
 			sess.POST("/clients/:id/reset-traffic", api.ResetClientTraffic)
@@ -157,12 +161,19 @@ func (s *Server) Start() error {
 			sess.PUT("/routing/:id", api.UpdateRouting)
 			sess.DELETE("/routing/:id", api.DeleteRouting)
 
+			sess.GET("/geodata/list", api.GeodataList)
+
 			sess.GET("/settings", api.GetSettings)
 			sess.POST("/settings", api.UpdateSettings)
 
 			sess.GET("/xray/config", api.XrayConfig)
 			sess.GET("/xray/config-issues", api.XrayConfigIssues)
 			sess.GET("/xray/logs", api.XrayLogs)
+			sess.GET("/logs/panel", api.PanelLogs)
+			sess.GET("/xray/template", api.GetXrayTemplate)
+			sess.POST("/xray/template", api.SetXrayTemplate)
+			sess.GET("/xray/template/default", api.GetXrayTemplateDefault)
+			sess.POST("/xray/route-test", api.XrayRouteTest)
 		}
 	}
 

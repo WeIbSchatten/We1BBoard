@@ -59,6 +59,12 @@ export function InboundsPage() {
     await load()
   }
 
+  async function cloneInbound(id: number) {
+    const created = await api<Inbound>(`/inbounds/${id}/clone`, { method: 'POST' })
+    await load()
+    setExpanded(created.id)
+  }
+
   async function showLink(client?: Client) {
     if (!client) return
     const data = await api<{ link: string }>(`/clients/${client.id}/link`)
@@ -161,6 +167,7 @@ export function InboundsPage() {
                     <td><span className={`badge ${r.enable ? 'on' : 'off'}`}>{r.enable ? tr('enable') : tr('disable')}</span></td>
                     <td className="row-actions">
                       <button className="btn secondary" onClick={() => setInboundModal({ open: true, mode: 'edit', inbound: r })}>{tr('edit')}</button>
+                      <button className="btn secondary" onClick={() => { void cloneInbound(r.id) }}>{tr('clone')}</button>
                       {inboundSupportsClients(r.protocol) && (
                         <button className="btn secondary" onClick={() => setClientModal({ open: true, mode: 'add', inbound: r, client: null })}>+ {tr('clients')}</button>
                       )}
@@ -254,16 +261,15 @@ export function InboundsPage() {
         }}
       />
 
-      {clientModal.inbound && (
-        <ClientFormModal
-          open={clientModal.open}
-          mode={clientModal.mode}
-          inbound={clientModal.inbound}
-          client={clientModal.client}
-          onClose={() => setClientModal({ open: false, mode: 'add', inbound: null, client: null })}
-          onSaved={() => { void load() }}
-        />
-      )}
+      <ClientFormModal
+        open={clientModal.open}
+        mode={clientModal.mode}
+        inbound={clientModal.inbound}
+        inbounds={rows.filter((i) => inboundSupportsClients(i.protocol))}
+        client={clientModal.client}
+        onClose={() => setClientModal({ open: false, mode: 'add', inbound: null, client: null })}
+        onSaved={() => { void load() }}
+      />
     </div>
   )
 }

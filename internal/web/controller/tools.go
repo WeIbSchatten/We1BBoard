@@ -40,6 +40,22 @@ func (a *API) RealityKeys(c *gin.Context) {
 	})
 }
 
+// WireGuardKeys generates a Curve25519 keypair in standard base64 (WireGuard / Xray format).
+func (a *API) WireGuardKeys(c *gin.Context) {
+	curve := ecdh.X25519()
+	priv, err := curve.GenerateKey(rand.Reader)
+	if err != nil {
+		fail(c, 500, err)
+		return
+	}
+	pub := priv.PublicKey()
+	ok(c, gin.H{
+		"privateKey": base64.StdEncoding.EncodeToString(priv.Bytes()),
+		"publicKey":  base64.StdEncoding.EncodeToString(pub.Bytes()),
+		"secretKey":  base64.StdEncoding.EncodeToString(priv.Bytes()),
+	})
+}
+
 // RandomUUID returns a new UUID string for client forms.
 func (a *API) RandomUUID(c *gin.Context) {
 	b := make([]byte, 16)

@@ -1,8 +1,10 @@
 package controller
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
+	goruntime "runtime"
 	"strconv"
 	"strings"
 
@@ -10,11 +12,13 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/mem"
+	psnet "github.com/shirou/gopsutil/v4/net"
 	"github.com/skip2/go-qrcode"
 	"github.com/we1bboard/we1bboard/internal/bridge"
 	"github.com/we1bboard/we1bboard/internal/config"
 	"github.com/we1bboard/we1bboard/internal/database"
 	"github.com/we1bboard/we1bboard/internal/database/model"
+	"github.com/we1bboard/we1bboard/internal/panellog"
 	"github.com/we1bboard/we1bboard/internal/protocol"
 	"github.com/we1bboard/we1bboard/internal/security"
 	"github.com/we1bboard/we1bboard/internal/sub"
@@ -187,6 +191,16 @@ func (a *API) DeleteInbound(c *gin.Context) {
 	ok(c, nil)
 }
 
+func (a *API) CloneInbound(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	cloned, err := a.Inbound.Clone(uint(id))
+	if err != nil {
+		fail(c, 400, err)
+		return
+	}
+	ok(c, cloned)
+}
+
 func (a *API) DisableInvalidInbounds(c *gin.Context) {
 	n, err := a.Inbound.DisableInvalid()
 	if err != nil {
@@ -240,6 +254,41 @@ func (a *API) ResetClientTraffic(c *gin.Context) {
 		return
 	}
 	ok(c, nil)
+}
+
+func (a *API) BulkAdjustClients(c *gin.Context) {
+	var req struct {
+		IDs     []uint `json:"ids"`
+		AddDays int    `json:"addDays"`
+		AddGB   int64  `json:"addGB"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, 400, err)
+		return
+	}
+	n, err := a.Client.BulkAdjust(req.IDs, req.AddDays, req.AddGB)
+	if err != nil {
+		fail(c, 400, err)
+		return
+	}
+	ok(c, gin.H{"count": n})
+}
+
+func (a *API) BulkAttachClients(c *gin.Context) {
+	var req struct {
+		IDs        []uint `json:"ids"`
+		InboundIDs []uint `json:"inboundIds"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, 400, err)
+		return
+	}
+	n, err := a.Client.BulkAttach(req.IDs, req.InboundIDs)
+	if err != nil {
+		fail(c, 400, err)
+		return
+	}
+	ok(c, gin.H{"count": n})
 }
 
 func (a *API) ClientLink(c *gin.Context) {
@@ -328,7 +377,11 @@ func (a *API) UpdateSettings(c *gin.Context) {
 			fail(c, 400, fmt.Errorf("setting %q is not writable via API", k))
 			return
 		}
-		if len(v) > 8192 {
+		maxLen := 8192
+		if k == "xrayTemplate" {
+			maxLen = 2 << 20 // 2 MiB
+		}
+		if len(v) > maxLen {
 			fail(c, 400, fmt.Errorf("setting %q too large", k))
 			return
 		}
@@ -354,13 +407,65 @@ func (a *API) ServerStatus(c *gin.Context) {
 	if vm != nil {
 		memPct = vm.UsedPercent
 	}
+	tcpCount, udpCount := 0, 0
+	if conns, err := psnet.Connections("tcp"); err == nil {
+		tcpCount = len(conns)
+	}
+	if conns, err := psnet.Connections("udp"); err == nil {
+		udpCount = len(conns)
+	}
+	var xrayUptime int64
+	xrayRunning := a.Xray != nil && a.Xray.IsRunning()
+	if a.Xray != nil && xrayRunning {
+		xrayUptime = int64(a.Xray.Uptime().Seconds())
+	}
 	ok(c, gin.H{
 		"version":     config.Version,
-		"xrayRunning": a.Xray != nil && a.Xray.IsRunning(),
+		"xrayRunning": xrayRunning,
 		"cpu":         cpuPct,
 		"memory":      memPct,
+		"tcpCount":    tcpCount,
+		"udpCount":    udpCount,
+		"xrayUptime":  xrayUptime,
+		"goroutines":  goruntime.NumGoroutine(),
 		"extra":       a.RT.Local.Extra.Status(),
 	})
+}
+
+// PanelLogs returns the last N lines from {DataDir}/panel.log.
+// GET /logs/panel?lines=200
+func (a *API) PanelLogs(c *gin.Context) {
+	lines := 200
+	if v := c.Query("lines"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			lines = n
+		}
+	}
+	if lines <= 0 {
+		lines = 200
+	}
+	if lines > 2000 {
+		lines = 2000
+	}
+	path := panellog.Path()
+	if path == "" {
+		ok(c, gin.H{
+			"source": "panel",
+			"lines":  []string{"panel.log not configured — call panellog.Init(dataDir) on startup"},
+			"path":   "",
+			"hint":   "panel syslog writes to {dataDir}/panel.log on reload errors and important events",
+		})
+		return
+	}
+	out, err := xray.TailFile(path, lines)
+	if err != nil {
+		fail(c, 500, err)
+		return
+	}
+	if len(out) == 0 {
+		out = []string{"(empty or missing) panel.log — important events are appended on xray reload errors"}
+	}
+	ok(c, gin.H{"source": "panel", "lines": out, "path": path})
 }
 
 func (a *API) XrayConfig(c *gin.Context) {
@@ -424,6 +529,56 @@ func (a *API) XrayRestart(c *gin.Context) {
 		return
 	}
 	ok(c, gin.H{"running": a.Xray.IsRunning()})
+}
+
+func (a *API) GetXrayTemplate(c *gin.Context) {
+	ok(c, xray.LoadTemplate())
+}
+
+func (a *API) GetXrayTemplateDefault(c *gin.Context) {
+	ok(c, xray.DefaultTemplate())
+}
+
+func (a *API) SetXrayTemplate(c *gin.Context) {
+	raw, err := c.GetRawData()
+	if err != nil {
+		fail(c, 400, err)
+		return
+	}
+	if len(raw) > 2<<20 {
+		fail(c, 400, fmt.Errorf("template too large (max 2MB)"))
+		return
+	}
+	tpl, err := xray.ValidateTemplateJSON(raw)
+	if err != nil {
+		fail(c, 400, err)
+		return
+	}
+	b, err := json.Marshal(tpl)
+	if err != nil {
+		fail(c, 500, err)
+		return
+	}
+	if err := database.SetSetting("xrayTemplate", string(b)); err != nil {
+		fail(c, 500, err)
+		return
+	}
+	_ = a.RT.ReloadLocal()
+	ok(c, tpl)
+}
+
+func (a *API) XrayRouteTest(c *gin.Context) {
+	var in xray.RouteTestInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		fail(c, 400, err)
+		return
+	}
+	res, err := a.Xray.RouteTest(in)
+	if err != nil {
+		fail(c, 500, err)
+		return
+	}
+	ok(c, res)
 }
 
 func (a *API) ListOutbounds(c *gin.Context) {

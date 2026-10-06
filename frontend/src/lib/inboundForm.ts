@@ -41,6 +41,24 @@ export type InboundFormState = {
   // shadowsocks
   ssMethod: string
   ssPassword: string
+  // wireguard / amneziawg
+  wgSecretKey: string
+  wgAddress: string
+  wgMtu: number
+  awgJc: number
+  awgJmin: number
+  awgJmax: number
+  awgS1: number
+  awgS2: number
+  awgH1: string
+  awgH2: string
+  awgH3: string
+  awgH4: string
+  // tuic / hysteria2
+  tuicCongestion: string
+  hy2Password: string
+  // mtproto
+  mtprotoFakeTlsDomain: string
   // sniffing
   sniffEnabled: boolean
   sniffDestOverride: string
@@ -50,6 +68,7 @@ export type InboundFormState = {
   sniffIpsExcluded: string
   // advanced
   fallbacksJSON: string
+  sockoptJSON: string
 }
 
 /** SS2022 password: base64 of 16 (aes-128) or 32 (aes-256 / other) random bytes. */
@@ -62,8 +81,35 @@ export function randomSS2022Password(method: string): string {
   return btoa(binary)
 }
 
+/** AmneziaWG-style obfuscation defaults (subset: jc/jmin/jmax/s1/s2/h1-h4). */
+export function randomAwgObfuscation(): Pick<
+  InboundFormState,
+  'awgJc' | 'awgJmin' | 'awgJmax' | 'awgS1' | 'awgS2' | 'awgH1' | 'awgH2' | 'awgH3' | 'awgH4'
+> {
+  const jmin = randomInteger(40, 89)
+  const s1 = randomInteger(15, 150)
+  let s2 = randomInteger(15, 150)
+  while (s1 + 56 === s2) s2 = randomInteger(15, 150)
+  const hMax = 2147483647
+  const lo = 5
+  const band = Math.floor((hMax - lo + 1) / 4)
+  const h = (i: number) => String(randomInteger(lo + i * band, lo + i * band + band - 1))
+  return {
+    awgJc: randomInteger(3, 6),
+    awgJmin: jmin,
+    awgJmax: jmin + randomInteger(50, 250),
+    awgS1: s1,
+    awgS2: s2,
+    awgH1: h(0),
+    awgH2: h(1),
+    awgH3: h(2),
+    awgH4: h(3),
+  }
+}
+
 export function emptyInboundForm(): InboundFormState {
   const ssMethod = '2022-blake3-aes-256-gcm'
+  const awg = randomAwgObfuscation()
   return {
     remark: '',
     port: randomInteger(10000, 60000),
@@ -95,6 +141,13 @@ export function emptyInboundForm(): InboundFormState {
     realitySpiderX: '/',
     ssMethod,
     ssPassword: randomSS2022Password(ssMethod),
+    wgSecretKey: '',
+    wgAddress: '10.0.0.1/24',
+    wgMtu: 1420,
+    ...awg,
+    tuicCongestion: 'bbr',
+    hy2Password: randomLowerAndNum(16),
+    mtprotoFakeTlsDomain: 'www.cloudflare.com',
     sniffEnabled: false,
     sniffDestOverride: 'http,tls,quic,fakedns',
     sniffRouteOnly: false,
@@ -102,6 +155,7 @@ export function emptyInboundForm(): InboundFormState {
     sniffDomainsExcluded: '',
     sniffIpsExcluded: '',
     fallbacksJSON: '[]',
+    sockoptJSON: '',
   }
 }
 
@@ -167,14 +221,36 @@ export function parseInboundToForm(inb: {
     f.realityFingerprint = String(rs.fingerprint || 'chrome')
     f.realitySpiderX = String(rs.spiderX || '/')
     f.realityPublicKey = String(rs.publicKey || (rs.settings as Record<string, string> | undefined)?.publicKey || '')
+    if (stream.sockopt !== undefined) {
+      f.sockoptJSON = JSON.stringify(stream.sockopt, null, 2)
+    }
   } catch { /* keep defaults */ }
   try {
     const settings = JSON.parse(inb.settings || '{}') as Record<string, unknown>
     if (typeof settings.method === 'string') f.ssMethod = settings.method
-    if (typeof settings.password === 'string') f.ssPassword = settings.password
+    if (typeof settings.password === 'string') {
+      f.ssPassword = settings.password
+      f.hy2Password = settings.password
+    }
     if (settings.fallbacks !== undefined) {
       f.fallbacksJSON = JSON.stringify(settings.fallbacks, null, 2)
     }
+    if (typeof settings.secretKey === 'string') f.wgSecretKey = settings.secretKey
+    if (typeof settings.mtu === 'number') f.wgMtu = settings.mtu
+    const addr = settings.address
+    if (Array.isArray(addr) && addr.length) f.wgAddress = String(addr[0])
+    else if (typeof addr === 'string') f.wgAddress = addr
+    if (typeof settings.jc === 'number') f.awgJc = settings.jc
+    if (typeof settings.jmin === 'number') f.awgJmin = settings.jmin
+    if (typeof settings.jmax === 'number') f.awgJmax = settings.jmax
+    if (typeof settings.s1 === 'number') f.awgS1 = settings.s1
+    if (typeof settings.s2 === 'number') f.awgS2 = settings.s2
+    if (settings.h1 !== undefined) f.awgH1 = String(settings.h1)
+    if (settings.h2 !== undefined) f.awgH2 = String(settings.h2)
+    if (settings.h3 !== undefined) f.awgH3 = String(settings.h3)
+    if (settings.h4 !== undefined) f.awgH4 = String(settings.h4)
+    if (typeof settings.congestion_control === 'string') f.tuicCongestion = settings.congestion_control
+    if (typeof settings.fakeTlsDomain === 'string') f.mtprotoFakeTlsDomain = settings.fakeTlsDomain
   } catch { /* */ }
   try {
     const sniff = JSON.parse(inb.sniffing || '{}') as Record<string, unknown>
@@ -199,8 +275,13 @@ function csvList(s: string): string[] {
   return s.split(',').map((x) => x.trim()).filter(Boolean)
 }
 
+/** Protocols that do not use Xray streamSettings. */
+export function protocolNeedsStream(protocol: string): boolean {
+  return !['tun', 'tunnel', 'mtproto', 'tuic', 'hysteria2', 'wireguard', 'amneziawg'].includes(protocol)
+}
+
 export function buildStreamSettings(f: InboundFormState): string {
-  if (['tun', 'tunnel', 'mtproto', 'tuic', 'hysteria2'].includes(f.protocol)) {
+  if (!protocolNeedsStream(f.protocol)) {
     return '{}'
   }
   const stream: Record<string, unknown> = {
@@ -290,6 +371,15 @@ export function buildStreamSettings(f: InboundFormState): string {
       },
     }
   }
+  const sockRaw = (f.sockoptJSON || '').trim()
+  if (sockRaw) {
+    const parsed = JSON.parse(sockRaw) as unknown
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      stream.sockopt = parsed
+    } else {
+      throw new Error('sockopt must be a JSON object')
+    }
+  }
   return JSON.stringify(stream)
 }
 
@@ -326,7 +416,44 @@ export function buildInboundSettings(f: InboundFormState): string {
       return JSON.stringify({ clients: [], fallbacks })
     case 'http':
     case 'socks':
-      return JSON.stringify({ auth: 'password', accounts: [], udp: false, ip: '127.0.0.1' })
+      return JSON.stringify({ auth: 'password', accounts: [], udp: f.protocol === 'socks', ip: '127.0.0.1' })
+    case 'wireguard':
+      return JSON.stringify({
+        secretKey: f.wgSecretKey || '',
+        address: [f.wgAddress || '10.0.0.1/24'],
+        peers: [],
+        mtu: f.wgMtu || 1420,
+      })
+    case 'amneziawg':
+      return JSON.stringify({
+        secretKey: f.wgSecretKey || '',
+        address: [f.wgAddress || '10.0.0.1/24'],
+        peers: [],
+        mtu: f.wgMtu || 1420,
+        jc: f.awgJc,
+        jmin: f.awgJmin,
+        jmax: f.awgJmax,
+        s1: f.awgS1,
+        s2: f.awgS2,
+        h1: f.awgH1,
+        h2: f.awgH2,
+        h3: f.awgH3,
+        h4: f.awgH4,
+      })
+    case 'tuic':
+      return JSON.stringify({
+        users: [],
+        congestion_control: f.tuicCongestion || 'bbr',
+      })
+    case 'hysteria2':
+      return JSON.stringify({
+        users: [],
+        password: f.hy2Password || '',
+      })
+    case 'mtproto':
+      return JSON.stringify({
+        fakeTlsDomain: f.mtprotoFakeTlsDomain || 'www.cloudflare.com',
+      })
     default:
       return '{}'
   }

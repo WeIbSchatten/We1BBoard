@@ -35,6 +35,7 @@ export type Inbound = {
 export type Client = {
   id: number
   inboundId: number
+  inboundIds?: string
   email: string
   enable: boolean
   uuid: string
@@ -44,6 +45,8 @@ export type Client = {
   limitIp?: number
   totalGB: number
   expiryTime: number
+  trafficReset?: string
+  extraLinks?: string
   up: number
   down: number
   comment: string

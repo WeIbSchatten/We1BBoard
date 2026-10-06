@@ -3,9 +3,9 @@ import { api } from '../api'
 import { useApp } from '../AppContext'
 
 type LogSource = 'error' | 'access' | 'process'
-type Tab = LogSource | 'config'
+type Tab = LogSource | 'panel' | 'config'
 
-type LogsResp = { source: string; lines: string[]; path: string }
+type LogsResp = { source: string; lines: string[]; path: string; hint?: string }
 type Status = { xrayRunning: boolean }
 type ConfigIssue = { tag: string; reason: string }
 
@@ -45,7 +45,10 @@ export function LogsPage() {
     setBusy(true)
     setMsg('')
     try {
-      const data = await api<LogsResp>(`/xray/logs?source=${tab}&lines=${lines}`)
+      const url = tab === 'panel'
+        ? `/logs/panel?lines=${lines}`
+        : `/xray/logs?source=${tab}&lines=${lines}`
+      const data = await api<LogsResp>(url)
       setText((data.lines || []).join('\n'))
       setPath(data.path || '')
       await loadIssues()
@@ -115,6 +118,7 @@ export function LogsPage() {
     { id: 'error', label: 'error' },
     { id: 'access', label: 'access' },
     { id: 'process', label: 'process' },
+    { id: 'panel', label: tr('panelLogs') },
     { id: 'config', label: tr('config') },
   ]
 

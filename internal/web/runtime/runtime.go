@@ -13,6 +13,7 @@ import (
 	"github.com/we1bboard/we1bboard/internal/database"
 	"github.com/we1bboard/we1bboard/internal/database/model"
 	"github.com/we1bboard/we1bboard/internal/extra"
+	"github.com/we1bboard/we1bboard/internal/panellog"
 	"github.com/we1bboard/we1bboard/internal/security"
 	"github.com/we1bboard/we1bboard/internal/tgproxy"
 	"github.com/we1bboard/we1bboard/internal/xray"
@@ -37,8 +38,12 @@ func (l *Local) Reload() error {
 	if l.Xray != nil {
 		if err := l.Xray.WriteConfig(); err != nil && first == nil {
 			first = err
+			panellog.Append("reload: WriteConfig failed: %v", err)
 		}
 		if _, err := os.Stat(l.Xray.Bin); err != nil {
+			if first == nil {
+				panellog.Append("reload: xray binary missing (%s)", l.Xray.Bin)
+			}
 			if l.Extra != nil {
 				_ = l.Extra.SyncAll()
 			}
@@ -47,10 +52,12 @@ func (l *Local) Reload() error {
 		if l.Xray.IsRunning() {
 			if err := l.Xray.Reload(); err != nil && first == nil {
 				first = err
+				panellog.Append("reload: Xray.Reload failed: %v", err)
 			}
 		} else {
 			if err := l.Xray.Start(); err != nil && first == nil {
 				first = err
+				panellog.Append("reload: Xray.Start failed: %v", err)
 			}
 		}
 	}

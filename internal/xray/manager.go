@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/we1bboard/we1bboard/internal/database"
 	"github.com/we1bboard/we1bboard/internal/database/model"
@@ -44,11 +45,20 @@ func (m *Manager) IsRunning() bool {
 	return m.proc != nil && m.proc.IsRunning()
 }
 
+// Uptime returns how long the xray process has been running, or 0 if stopped.
+func (m *Manager) Uptime() time.Duration {
+	if m.proc == nil {
+		return 0
+	}
+	return m.proc.Uptime()
+}
+
 func (m *Manager) GenerateConfig() (map[string]any, error) {
 	var inbounds []model.Inbound
-	if err := database.DB.Preload("Clients").Where("enable = ?", true).Find(&inbounds).Error; err != nil {
+	if err := database.DB.Where("enable = ?", true).Find(&inbounds).Error; err != nil {
 		return nil, err
 	}
+	attachClientsForConfig(inbounds)
 	var outbounds []model.Outbound
 	if err := database.DB.Where("enable = ?", true).Find(&outbounds).Error; err != nil {
 		return nil, err
@@ -61,6 +71,8 @@ func (m *Manager) GenerateConfig() (map[string]any, error) {
 	if err := database.DB.Where("enable = ?", true).Order("priority asc").Find(&rules).Error; err != nil {
 		return nil, err
 	}
+
+	cfg := deepCopyMap(LoadTemplate())
 
 	apiInbound := map[string]any{
 		"tag":      "api",
@@ -78,8 +90,11 @@ func (m *Manager) GenerateConfig() (map[string]any, error) {
 			log.Printf("[xray] skip inbound id=%d tag=%s: %s", in.ID, issue.Tag, issue.Reason)
 			continue
 		}
-		xInbounds = append(xInbounds, obj)
+		if obj != nil {
+			xInbounds = append(xInbounds, obj)
+		}
 	}
+	cfg["inbounds"] = xInbounds
 
 	xOutbounds := make([]map[string]any, 0, len(outbounds)+len(bridges)+2)
 	for _, o := range outbounds {
@@ -96,29 +111,97 @@ func (m *Manager) GenerateConfig() (map[string]any, error) {
 		xOutbounds = append(xOutbounds, item)
 	}
 
-	routingRules := []map[string]any{
-		{"type": "field", "inboundTag": []string{"api"}, "outboundTag": "api"},
-	}
-
+	bridgeRules := make([]map[string]any, 0)
 	for _, b := range bridges {
 		tag := b.OutboundTag
 		if tag == "" {
 			tag = fmt.Sprintf("bridge-%d", b.ID)
 		}
-		outbound := buildBridgeOutbound(b, tag)
-		xOutbounds = append(xOutbounds, outbound)
+		xOutbounds = append(xOutbounds, buildBridgeOutbound(b, tag))
 		if b.RoutingInbound != "" {
-			tags := splitCSV(b.RoutingInbound)
-			routingRules = append(routingRules, map[string]any{
+			bridgeRules = append(bridgeRules, map[string]any{
 				"type":        "field",
-				"inboundTag":  tags,
+				"inboundTag":  splitCSV(b.RoutingInbound),
 				"outboundTag": tag,
 			})
 		}
 	}
 
-	for _, r := range rules {
-		rule := map[string]any{"type": "field", "outboundTag": r.OutboundTag}
+	hasAPIOut := false
+	for _, o := range xOutbounds {
+		if o["tag"] == "api" {
+			hasAPIOut = true
+			break
+		}
+	}
+	if !hasAPIOut {
+		xOutbounds = append([]map[string]any{{
+			"tag": "api", "protocol": "freedom", "settings": map[string]any{},
+		}}, xOutbounds...)
+	}
+	cfg["outbounds"] = xOutbounds
+
+	if _, ok := cfg["api"]; !ok {
+		cfg["api"] = deepCopyMap(DefaultTemplate())["api"]
+	}
+
+	ensureLogPaths(cfg, m.ConfigDir)
+	cfg["routing"] = mergeRouting(cfg["routing"], bridgeRules, rules)
+
+	return cfg, nil
+}
+
+func ensureLogPaths(cfg map[string]any, configDir string) {
+	logObj, _ := cfg["log"].(map[string]any)
+	if logObj == nil {
+		logObj = map[string]any{"loglevel": "warning"}
+		cfg["log"] = logObj
+	}
+	logObj["access"] = filepath.Join(configDir, "access.log")
+	logObj["error"] = filepath.Join(configDir, "error.log")
+	if _, ok := logObj["loglevel"]; !ok {
+		logObj["loglevel"] = "warning"
+	}
+}
+
+func mergeRouting(raw any, bridgeRules []map[string]any, dbRules []model.RoutingRule) map[string]any {
+	tplRouting, _ := raw.(map[string]any)
+	if tplRouting == nil {
+		tplRouting = map[string]any{}
+	}
+
+	domainStrategy := "AsIs"
+	if ds, ok := tplRouting["domainStrategy"].(string); ok && strings.TrimSpace(ds) != "" {
+		domainStrategy = ds
+	}
+	if setting := strings.TrimSpace(database.GetSetting("routingDomainStrategy")); setting != "" {
+		switch setting {
+		case "IPIfNonMatch", "IPOnDemand", "AsIs":
+			domainStrategy = setting
+		}
+	}
+
+	var tplRules []map[string]any
+	if rawRules, ok := tplRouting["rules"].([]any); ok {
+		for _, r := range rawRules {
+			if m, ok := r.(map[string]any); ok {
+				tplRules = append(tplRules, m)
+			}
+		}
+	}
+
+	routingRules := []map[string]any{
+		{"type": "field", "inboundTag": []string{"api"}, "outboundTag": "api"},
+	}
+	routingRules = append(routingRules, bridgeRules...)
+
+	for _, r := range dbRules {
+		rule := map[string]any{"type": "field"}
+		if strings.TrimSpace(r.BalancerTag) != "" {
+			rule["balancerTag"] = r.BalancerTag
+		} else {
+			rule["outboundTag"] = r.OutboundTag
+		}
 		if r.InboundTag != "" {
 			rule["inboundTag"] = []string{r.InboundTag}
 		}
@@ -140,65 +223,27 @@ func (m *Manager) GenerateConfig() (map[string]any, error) {
 		routingRules = append(routingRules, rule)
 	}
 
-	hasAPIOut := false
-	for _, o := range xOutbounds {
-		if o["tag"] == "api" {
-			hasAPIOut = true
-			break
+	for _, r := range tplRules {
+		if isAPIRule(r) {
+			continue
 		}
-	}
-	if !hasAPIOut {
-		xOutbounds = append([]map[string]any{{
-			"tag": "api", "protocol": "freedom", "settings": map[string]any{},
-		}}, xOutbounds...)
+		routingRules = append(routingRules, r)
 	}
 
-	cfg := map[string]any{
-		"log": map[string]any{
-			"loglevel": "warning",
-			"access":   filepath.Join(m.ConfigDir, "access.log"),
-			"error":    filepath.Join(m.ConfigDir, "error.log"),
-		},
-		"api": map[string]any{
-			"tag":      "api",
-			"services": []string{"HandlerService", "LoggerService", "StatsService"},
-		},
-		"stats": map[string]any{},
-		"policy": map[string]any{
-			"levels": map[string]any{
-				"0": map[string]any{"statsUserUplink": true, "statsUserDownlink": true},
-			},
-			"system": map[string]any{
-				"statsInboundUplink":    true,
-				"statsInboundDownlink":  true,
-				"statsOutboundUplink":   true,
-				"statsOutboundDownlink": true,
-			},
-		},
-		"inbounds":  xInbounds,
-		"outbounds": xOutbounds,
-		"routing": map[string]any{
-			"domainStrategy": routingDomainStrategy(),
-			"rules":          routingRules,
-		},
+	out := map[string]any{
+		"domainStrategy": domainStrategy,
+		"rules":          routingRules,
 	}
-	return cfg, nil
+	if balancers, ok := tplRouting["balancers"]; ok && balancers != nil {
+		out["balancers"] = balancers
+	}
+	return out
 }
 
 // ConfigIssue describes an enabled inbound skipped while generating Xray config.
 type ConfigIssue struct {
 	Tag    string `json:"tag"`
 	Reason string `json:"reason"`
-}
-
-func routingDomainStrategy() string {
-	v := strings.TrimSpace(database.GetSetting("routingDomainStrategy"))
-	switch v {
-	case "IPIfNonMatch", "IPOnDemand", "AsIs":
-		return v
-	default:
-		return "AsIs"
-	}
 }
 
 func inboundTag(in *model.Inbound) string {
@@ -231,9 +276,10 @@ func buildXrayInbound(in *model.Inbound) (map[string]any, *ConfigIssue) {
 // ConfigIssues returns enabled inbounds that would be skipped when generating config.
 func (m *Manager) ConfigIssues() ([]ConfigIssue, error) {
 	var inbounds []model.Inbound
-	if err := database.DB.Preload("Clients").Where("enable = ?", true).Find(&inbounds).Error; err != nil {
+	if err := database.DB.Where("enable = ?", true).Find(&inbounds).Error; err != nil {
 		return nil, err
 	}
+	attachClientsForConfig(inbounds)
 	issues := make([]ConfigIssue, 0)
 	for i := range inbounds {
 		_, issue := buildXrayInbound(&inbounds[i])
@@ -242,6 +288,26 @@ func (m *Manager) ConfigIssues() ([]ConfigIssue, error) {
 		}
 	}
 	return issues, nil
+}
+
+// attachClientsForConfig sets Clients on each inbound to those with InboundID==id OR inboundIds containing id.
+func attachClientsForConfig(inbounds []model.Inbound) {
+	if len(inbounds) == 0 {
+		return
+	}
+	var clients []model.Client
+	if err := database.DB.Find(&clients).Error; err != nil {
+		return
+	}
+	byID := map[uint][]model.Client{}
+	for _, c := range clients {
+		for _, iid := range model.ParseInboundIDList(&c) {
+			byID[iid] = append(byID[iid], c)
+		}
+	}
+	for i := range inbounds {
+		inbounds[i].Clients = byID[inbounds[i].ID]
+	}
 }
 
 func splitCSV(s string) []string {

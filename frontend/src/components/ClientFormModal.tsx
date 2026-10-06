@@ -14,16 +14,26 @@ type Props = {
   onSaved: () => void
 }
 
-type Tab = 'basic' | 'config'
+type Tab = 'basic' | 'config' | 'links'
 
 function freshEmail(): string {
   return `${randomLowerAndNum(8)}@we1b`
 }
 
+function parseSelectedIds(client: Client | null, fallback: number): number[] {
+  if (client?.inboundIds) {
+    const ids = client.inboundIds.split(',').map((x) => Number(x.trim())).filter((n) => n > 0)
+    if (ids.length) return [...new Set(ids)]
+  }
+  if (client?.inboundId) return [client.inboundId]
+  if (fallback) return [fallback]
+  return []
+}
+
 export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose, onSaved }: Props) {
   const { tr } = useApp()
   const [tab, setTab] = useState<Tab>('basic')
-  const [inboundId, setInboundId] = useState(0)
+  const [selectedInboundIds, setSelectedInboundIds] = useState<number[]>([])
   const [email, setEmail] = useState('')
   const [uuid, setUuid] = useState('')
   const [password, setPassword] = useState('')
@@ -33,6 +43,8 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
   const [totalGB, setTotalGB] = useState(0)
   const [limitIp, setLimitIp] = useState(0)
   const [expiryDays, setExpiryDays] = useState(0)
+  const [trafficReset, setTrafficReset] = useState('never')
+  const [extraLinks, setExtraLinks] = useState('')
   const [tgId, setTgId] = useState(0)
   const [comment, setComment] = useState('')
   const [error, setError] = useState('')
@@ -43,7 +55,8 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
     [inbounds],
   )
 
-  const selectedInbound = inbound || eligibleInbounds.find((i) => i.id === inboundId) || null
+  const primaryId = inbound?.id || selectedInboundIds[0] || 0
+  const selectedInbound = inbound || eligibleInbounds.find((i) => i.id === primaryId) || null
   const protocol = selectedInbound?.protocol || ''
 
   useEffect(() => {
@@ -51,7 +64,7 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
     setTab('basic')
     setError('')
     if (mode === 'edit' && client) {
-      setInboundId(client.inboundId)
+      setSelectedInboundIds(parseSelectedIds(client, inbound?.id || 0))
       setEmail(client.email)
       setUuid(client.uuid)
       setPassword(client.password || '')
@@ -62,12 +75,14 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
       setLimitIp(client.limitIp || 0)
       setComment(client.comment || '')
       setTgId(client.tgId || 0)
+      setTrafficReset(client.trafficReset || 'never')
+      setExtraLinks(client.extraLinks || '')
       if (client.expiryTime > 0) {
         setExpiryDays(Math.max(0, Math.ceil((client.expiryTime - Date.now()) / 86400000)))
       } else setExpiryDays(0)
     } else {
       const ib = inbound || eligibleInbounds[0] || null
-      setInboundId(ib?.id || 0)
+      setSelectedInboundIds(ib ? [ib.id] : [])
       setEmail(freshEmail())
       setUuid(randomUUID())
       setPassword(randomLowerAndNum(16))
@@ -78,6 +93,8 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
       setExpiryDays(0)
       setComment('')
       setTgId(0)
+      setTrafficReset('never')
+      setExtraLinks('')
       if (ib) {
         const f = parseInboundToForm(ib)
         setFlow(suggestedFlow(f))
@@ -87,12 +104,25 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
     }
   }, [open, mode, client, inbound, eligibleInbounds])
 
+  function toggleInbound(id: number) {
+    setSelectedInboundIds((prev) => {
+      if (prev.includes(id)) {
+        const next = prev.filter((x) => x !== id)
+        return next
+      }
+      const next = [...prev, id]
+      const ib = eligibleInbounds.find((i) => i.id === id)
+      if (ib && next.length === 1) setFlow(suggestedFlow(parseInboundToForm(ib)))
+      return next
+    })
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault()
     setError('')
-    const id = inbound?.id || inboundId
-    if (!id) {
-      setError('Select inbound')
+    const ids = mode === 'add' && inbound ? [inbound.id] : selectedInboundIds
+    if (!ids.length) {
+      setError('Select at least one inbound')
       return
     }
     if ((subId || '').length < 16) {
@@ -102,7 +132,8 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
     setBusy(true)
     try {
       const body = {
-        inboundId: id,
+        inboundId: ids[0],
+        inboundIds: ids.join(','),
         email,
         uuid: uuid || undefined,
         password: password || undefined,
@@ -111,6 +142,8 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
         enable,
         totalGB,
         limitIp,
+        trafficReset,
+        extraLinks,
         comment,
         tgId,
         expiryTime: expiryDays > 0 ? Date.now() + expiryDays * 86400000 : 0,
@@ -138,24 +171,33 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
         <div className="tabs" style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
           <button type="button" className={`tab ${tab === 'basic' ? 'active' : ''}`} onClick={() => setTab('basic')}>{tr('tabGeneral')}</button>
           <button type="button" className={`tab ${tab === 'config' ? 'active' : ''}`} onClick={() => setTab('config')}>{tr('tabConfig')}</button>
+          <button type="button" className={`tab ${tab === 'links' ? 'active' : ''}`} onClick={() => setTab('links')}>Links</button>
         </div>
 
         {tab === 'basic' && (
           <div className="grid2">
-            {!inbound && (
+            {!(mode === 'add' && inbound) && (
+              <div className="field" style={{ gridColumn: '1 / -1' }}>
+                <label className="label">Inbounds (multi)</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 160, overflow: 'auto', padding: 8, border: '1px solid var(--border)', borderRadius: 8 }}>
+                  {eligibleInbounds.length === 0 && <span className="page-sub">No eligible inbounds</span>}
+                  {eligibleInbounds.map((i) => (
+                    <label key={i.id} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={selectedInboundIds.includes(i.id)}
+                        onChange={() => toggleInbound(i.id)}
+                      />
+                      <span>#{i.id} {i.remark || i.tag} ({i.protocol}:{i.port})</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+            {mode === 'add' && inbound && (
               <div className="field" style={{ gridColumn: '1 / -1' }}>
                 <label className="label">Inbound</label>
-                <select className="select" value={inboundId} onChange={(e) => {
-                  const id = Number(e.target.value)
-                  setInboundId(id)
-                  const ib = eligibleInbounds.find((i) => i.id === id)
-                  if (ib) setFlow(suggestedFlow(parseInboundToForm(ib)))
-                }} required>
-                  <option value={0}>—</option>
-                  {eligibleInbounds.map((i) => (
-                    <option key={i.id} value={i.id}>#{i.id} {i.remark || i.tag} ({i.protocol}:{i.port})</option>
-                  ))}
-                </select>
+                <input className="input" readOnly value={`#${inbound.id} ${inbound.remark || inbound.tag} (${inbound.protocol}:${inbound.port})`} />
               </div>
             )}
             <div className="field">
@@ -176,6 +218,15 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
             <div className="field">
               <label className="label">Expiry days (0 = never)</label>
               <input className="input" type="number" min={0} value={expiryDays} onChange={(e) => setExpiryDays(Number(e.target.value))} />
+            </div>
+            <div className="field">
+              <label className="label">Traffic reset</label>
+              <select className="select" value={trafficReset} onChange={(e) => setTrafficReset(e.target.value)}>
+                <option value="never">never</option>
+                <option value="daily">daily</option>
+                <option value="weekly">weekly</option>
+                <option value="monthly">monthly</option>
+              </select>
             </div>
             <div className="field">
               <label className="label">Telegram ID</label>
@@ -230,6 +281,20 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
           </div>
         )}
 
+        {tab === 'links' && (
+          <div className="field">
+            <label className="label">Extra share links <span className="hint">(one per line — appended to subscription)</span></label>
+            <textarea
+              className="input"
+              rows={8}
+              value={extraLinks}
+              onChange={(e) => setExtraLinks(e.target.value)}
+              placeholder={'vless://...\nss://...'}
+              style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: '0.85rem' }}
+            />
+          </div>
+        )}
+
         {error && <p className="error">{error}</p>}
         <div className="row-actions">
           <button className="btn" type="submit" disabled={busy}>{busy ? '…' : tr('save')}</button>
@@ -252,6 +317,7 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
           color: var(--accent);
           border-color: transparent;
         }
+        .hint { color: var(--text-muted); font-weight: 400; font-size: 0.8em; }
       `}</style>
     </div>
   )

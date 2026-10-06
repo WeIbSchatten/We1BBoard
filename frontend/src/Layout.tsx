@@ -11,6 +11,7 @@ const links = [
   ['/nodes', 'nodes', '⬡'],
   ['/tgproxy', 'tgproxy', '✈'],
   ['/routing', 'routing', '⎇'],
+  ['/xray', 'xray', '✦'],
   ['/logs', 'logs', '☰'],
   ['/settings', 'settings', '⚙'],
 ] as const

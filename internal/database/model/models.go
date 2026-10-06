@@ -58,6 +58,7 @@ type Inbound struct {
 type Client struct {
 	ID         uint      `gorm:"primaryKey" json:"id"`
 	InboundID  uint      `gorm:"index;not null" json:"inboundId"`
+	InboundIDs string    `gorm:"size:512" json:"inboundIds"` // csv of inbound ids (primary first); InboundID kept for compat
 	Email      string    `gorm:"size:255;index" json:"email"`
 	Enable     bool      `gorm:"default:true" json:"enable"`
 	UUID       string    `gorm:"size:64" json:"uuid"`
@@ -67,6 +68,8 @@ type Client struct {
 	LimitIP    int       `json:"limitIp"`
 	TotalGB    int64     `json:"totalGB"`
 	ExpiryTime int64     `json:"expiryTime"`
+	TrafficReset string  `gorm:"size:32;default:never" json:"trafficReset"` // never|daily|weekly|monthly
+	ExtraLinks string    `gorm:"type:text" json:"extraLinks"`              // newline-separated share links
 	Up         int64     `json:"up"`
 	Down       int64     `json:"down"`
 	TgID       int64     `json:"tgId"`
@@ -158,17 +161,18 @@ type TgProxyProfile struct {
 }
 
 type RoutingRule struct {
-	ID        uint      `gorm:"primaryKey" json:"id"`
-	Remark    string    `gorm:"size:255" json:"remark"`
-	Enable    bool      `gorm:"default:true" json:"enable"`
-	Priority  int       `gorm:"default:100" json:"priority"`
-	InboundTag string   `gorm:"size:128" json:"inboundTag"`
-	OutboundTag string  `gorm:"size:128;not null" json:"outboundTag"`
-	Domain    string    `gorm:"type:text" json:"domain"`
-	IP        string    `gorm:"type:text" json:"ip"`
-	Port      string    `gorm:"size:64" json:"port"`
-	Network   string    `gorm:"size:32" json:"network"`
-	Protocol  string    `gorm:"size:64" json:"protocol"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	Remark      string    `gorm:"size:255" json:"remark"`
+	Enable      bool      `gorm:"default:true" json:"enable"`
+	Priority    int       `gorm:"default:100" json:"priority"`
+	InboundTag  string    `gorm:"size:128" json:"inboundTag"`
+	OutboundTag string    `gorm:"size:128;not null" json:"outboundTag"`
+	BalancerTag string    `gorm:"size:128" json:"balancerTag"`
+	Domain      string    `gorm:"type:text" json:"domain"`
+	IP          string    `gorm:"type:text" json:"ip"`
+	Port        string    `gorm:"size:64" json:"port"`
+	Network     string    `gorm:"size:32" json:"network"`
+	Protocol    string    `gorm:"size:64" json:"protocol"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
