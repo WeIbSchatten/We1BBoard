@@ -69,6 +69,7 @@ func (s *Server) Mount(r gin.IRouter, basePath string) {
 	g.GET("/:subId/json", s.handleJSON)
 	g.GET("/:subId/clash", s.handleClash)
 	g.GET("/:subId/singbox", s.handleSingBox)
+	g.GET("/:subId/qr", s.handleQR)
 }
 
 // StartDedicated listens on subPort with only subscription routes.
@@ -258,7 +259,11 @@ func detectFormat(ua, formatQ string) string {
 }
 
 func (s *Server) handleAuto(c *gin.Context) {
-	entries, err := s.resolve(c.Param("subId"))
+	subID := c.Param("subId")
+	if s.maybeServeSubPage(c, subID) {
+		return
+	}
+	entries, err := s.resolve(subID)
 	if err != nil {
 		if err == errNotFound {
 			c.Status(http.StatusNotFound)
@@ -281,7 +286,11 @@ func (s *Server) handleAuto(c *gin.Context) {
 }
 
 func (s *Server) handleJSON(c *gin.Context) {
-	entries, err := s.resolve(c.Param("subId"))
+	subID := c.Param("subId")
+	if s.maybeServeSubPage(c, subID) {
+		return
+	}
+	entries, err := s.resolve(subID)
 	if err != nil {
 		if err == errNotFound {
 			c.Status(http.StatusNotFound)
@@ -295,7 +304,11 @@ func (s *Server) handleJSON(c *gin.Context) {
 }
 
 func (s *Server) handleClash(c *gin.Context) {
-	entries, err := s.resolve(c.Param("subId"))
+	subID := c.Param("subId")
+	if s.maybeServeSubPage(c, subID) {
+		return
+	}
+	entries, err := s.resolve(subID)
 	if err != nil {
 		if err == errNotFound {
 			c.Status(http.StatusNotFound)
@@ -309,7 +322,11 @@ func (s *Server) handleClash(c *gin.Context) {
 }
 
 func (s *Server) handleSingBox(c *gin.Context) {
-	entries, err := s.resolve(c.Param("subId"))
+	subID := c.Param("subId")
+	if s.maybeServeSubPage(c, subID) {
+		return
+	}
+	entries, err := s.resolve(subID)
 	if err != nil {
 		if err == errNotFound {
 			c.Status(http.StatusNotFound)
@@ -672,6 +689,20 @@ func ValidateSettings(key, value string) error {
 	case "subTitle":
 		if len(value) > 128 {
 			return fmt.Errorf("subTitle too long")
+		}
+	case "subSupportUrl":
+		v := strings.TrimSpace(value)
+		if v == "" {
+			return nil
+		}
+		if len(v) > 512 {
+			return fmt.Errorf("subSupportUrl too long")
+		}
+		if !strings.HasPrefix(v, "https://") && !strings.HasPrefix(v, "http://") {
+			return fmt.Errorf("subSupportUrl must be http(s) URL")
+		}
+		if strings.ContainsAny(v, " \t\r\n\"'<>") {
+			return fmt.Errorf("invalid subSupportUrl")
 		}
 	}
 	return nil

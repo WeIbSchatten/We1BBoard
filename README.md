@@ -82,14 +82,17 @@ bash <(curl -fsSL https://raw.githubusercontent.com/WeIbSchatten/We1BBoard/main/
 После установки у каждого клиента есть `subId`. В панели: **Inbounds → Подписка**.
 
 ```text
-https://HOST:subPort/sub/<subId>           # auto по User-Agent
+https://HOST:subPort/sub/<subId>              # браузер → HTML-страница; клиент → auto
+https://HOST:subPort/sub/<subId>?html=1       # полная HTML-страница с конфигами
 https://HOST:subPort/sub/<subId>/clash
 https://HOST:subPort/sub/<subId>/singbox
 https://HOST:subPort/sub/<subId>/json
+https://HOST:subPort/sub/<subId>/qr           # QR подписочного URL
 https://HOST:subPort/sub/<subId>?format=base64
 ```
 
-- `subEnable` / `subPort` (по умолчанию 2096) / `subPath` / `subHost` / `subTitle` — в Settings  
+- `subEnable` / `subPort` (по умолчанию 2096) / `subPath` / `subHost` / `subTitle` / `subSupportUrl` — в Settings  
+- HTML-страница подписки (как 3x-ui): трафик, expiry, copy URL, QR; в браузере — copy-only без встроенных конфигов; `?html=1` — полная  
 - Отдельный HTTPS listener на `subPort` только при настроенных `certFile`/`keyFile`; без TLS подписка монтируется на порт панели (чтобы не открывать второй cleartext-порт с учётками)  
 - `subEnable=false` сразу отключает выдачу (без рестарта)  
 - Заголовок `Subscription-Userinfo` (upload/download/total/expire)  

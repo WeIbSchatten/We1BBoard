@@ -107,12 +107,13 @@ export function SettingsPage() {
             subEnable
           </label>
         </div>
-        {(['subPort', 'subPath', 'subHost', 'subTitle'] as const).map((k) => (
+        {(['subPort', 'subPath', 'subHost', 'subTitle', 'subSupportUrl'] as const).map((k) => (
           <div className="field" key={k}>
             <label className="label">{k}</label>
             <input className="input" value={settings[k] || ''} onChange={(e) => setSettings({ ...settings, [k]: e.target.value })} />
           </div>
         ))}
+        <p className="page-sub">В браузере URL подписки открывает HTML-страницу (копирование ссылок + QR). VPN-клиенты получают raw. Полная страница с конфигами: добавьте <code>?html=1</code>.</p>
         {subInfo && (
           <div className="field">
             <label className="label">Base URL</label>
