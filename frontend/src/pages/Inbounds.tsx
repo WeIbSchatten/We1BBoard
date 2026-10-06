@@ -37,6 +37,7 @@ export function InboundsPage() {
   })
   const [error, setError] = useState('')
   const [link, setLink] = useState('')
+  const [subUrls, setSubUrls] = useState<Record<string, string> | null>(null)
   const [qrClientId, setQrClientId] = useState<number | null>(null)
 
   async function load() {
@@ -88,7 +89,16 @@ export function InboundsPage() {
     if (!client) return
     const data = await api<{ link: string }>(`/clients/${client.id}/link`)
     setLink(data.link)
+    setSubUrls(null)
     setQrClientId(client.id)
+  }
+
+  async function showSub(client?: Client) {
+    if (!client) return
+    const data = await api<{ urls: Record<string, string>; subId: string; enable: boolean }>(`/clients/${client.id}/sub`)
+    setSubUrls(data.urls)
+    setLink('')
+    setQrClientId(null)
   }
 
   const qrSrc = qrClientId
@@ -130,6 +140,7 @@ export function InboundsPage() {
                 <td><span className={`badge ${r.enable ? 'on' : 'off'}`}>{r.enable ? tr('enable') : tr('disable')}</span></td>
                 <td className="row-actions">
                   <button className="btn secondary" onClick={() => showLink(r.clients?.[0])}>{tr('link')}</button>
+                  <button className="btn secondary" onClick={() => showSub(r.clients?.[0])}>{tr('subscription')}</button>
                   <button className="btn danger" onClick={() => remove(r.id)}>{tr('delete')}</button>
                 </td>
               </tr>
@@ -143,6 +154,18 @@ export function InboundsPage() {
           <div className="label">{tr('link')}</div>
           <textarea className="textarea" readOnly value={link} />
           {qrSrc && <img src={qrSrc} alt="qr" style={{ marginTop: 12, width: 180, height: 180, background: '#fff', padding: 8, borderRadius: 8 }} />}
+        </div>
+      )}
+
+      {subUrls && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <div className="label">{tr('subscription')}</div>
+          {Object.entries(subUrls).map(([k, v]) => (
+            <div className="field" key={k}>
+              <label className="label">{k}</label>
+              <input className="input" readOnly value={v} onFocus={(e) => e.target.select()} />
+            </div>
+          ))}
         </div>
       )}
 

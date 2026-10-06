@@ -119,6 +119,8 @@ func (s *Server) Start() error {
 			sess.DELETE("/clients/:id", api.DeleteClient)
 			sess.GET("/clients/:id/link", api.ClientLink)
 			sess.GET("/clients/:id/qr", api.ClientQR)
+			sess.GET("/clients/:id/sub", api.ClientSub)
+			sess.GET("/subscription", api.SubscriptionInfo)
 
 			sess.GET("/outbounds", api.ListOutbounds)
 			sess.POST("/outbounds", api.CreateOutbound)
@@ -168,11 +170,37 @@ func (s *Server) Start() error {
 		r.HandleContext(c)
 	})
 
-	subPath := database.GetSetting("subPath")
-	if subPath == "" {
-		subPath = "/sub/"
+	subPath := sub.NormalizePath(database.GetSetting("subPath"))
+	subPort := database.GetSetting("subPort")
+	if subPort == "" {
+		subPort = "2096"
 	}
-	sub.New().Mount(r, subPath)
+	listen := database.GetSetting("webListen")
+	if listen == "" {
+		listen = "0.0.0.0"
+	}
+	port := database.GetSetting("panelPort")
+	certFile := database.GetSetting("certFile")
+	keyFile := database.GetSetting("keyFile")
+	subSrv := sub.New()
+
+	// Same-port when ports match OR no TLS (avoid a second cleartext credential listener).
+	// Dedicated subPort only when TLS certs are configured (3x-ui-style separate port).
+	if sub.Enabled() {
+		useDedicated := subPort != port && certFile != "" && keyFile != ""
+		if useDedicated {
+			go func() {
+				if err := subSrv.StartDedicated(listen, subPort, certFile, keyFile, subPath); err != nil {
+					fmt.Println("subscription server:", err)
+				}
+			}()
+		} else {
+			if subPort != port && (certFile == "" || keyFile == "") {
+				fmt.Printf("WARNING: subscription TLS not configured — mounting on panel port %s (set certFile/keyFile to use dedicated subPort %s over HTTPS)\n", port, subPort)
+			}
+			subSrv.Mount(r, subPath)
+		}
+	}
 
 	static, err := fs.Sub(distFS, "dist")
 	if err != nil {
@@ -210,10 +238,6 @@ func (s *Server) Start() error {
 	})
 
 	s.engine = r
-	listen := database.GetSetting("webListen")
-	port := database.GetSetting("panelPort")
-	certFile := database.GetSetting("certFile")
-	keyFile := database.GetSetting("keyFile")
 	addr := s.Cfg.Listen
 	if addr == "" {
 		addr = fmt.Sprintf("%s:%s", listen, port)

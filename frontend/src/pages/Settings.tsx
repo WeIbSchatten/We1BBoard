@@ -2,9 +2,19 @@ import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { useApp } from '../AppContext'
 
+type SubInfo = {
+  enable: boolean
+  subPort: string
+  subPath: string
+  subHost: string
+  baseUrl: string
+  formats: string[]
+}
+
 export function SettingsPage() {
   const { tr, theme, setTheme, accent, setAccent, lang, setLang } = useApp()
   const [settings, setSettings] = useState<Record<string, string>>({})
+  const [subInfo, setSubInfo] = useState<SubInfo | null>(null)
   const [msg, setMsg] = useState('')
   const [pw, setPw] = useState({ oldPassword: '', newPassword: '' })
 
@@ -15,6 +25,7 @@ export function SettingsPage() {
       if (s.accent) setAccent(s.accent as 'blue' | 'purple')
       if (s.lang === 'ru' || s.lang === 'en') setLang(s.lang)
     }).catch(console.error)
+    api<SubInfo>('/subscription').then(setSubInfo).catch(console.error)
   }, [])
 
   async function save() {
@@ -22,7 +33,8 @@ export function SettingsPage() {
     const next = { ...settings, theme, accent, lang }
     await api('/settings', { method: 'POST', body: JSON.stringify(next) })
     setSettings(next)
-    setMsg('OK')
+    setSubInfo(await api<SubInfo>('/subscription'))
+    setMsg('OK — restart panel if subPort / subEnable / TLS changed')
   }
 
   async function changePassword() {
@@ -35,6 +47,8 @@ export function SettingsPage() {
       setMsg(e instanceof Error ? e.message : 'error')
     }
   }
+
+  const subEnabled = (settings.subEnable ?? 'true') === 'true' || settings.subEnable === '1'
 
   return (
     <div>
@@ -68,7 +82,7 @@ export function SettingsPage() {
         </div>
 
         <div className="card">
-          {(['panelPort', 'panelPath', 'subPort', 'subPath', 'subHost', 'webListen', 'certFile', 'keyFile'] as const).map((k) => (
+          {(['panelPort', 'panelPath', 'webListen', 'certFile', 'keyFile'] as const).map((k) => (
             <div className="field" key={k}>
               <label className="label">{k}</label>
               <input className="input" value={settings[k] || ''} onChange={(e) => setSettings({ ...settings, [k]: e.target.value })} />
@@ -78,6 +92,35 @@ export function SettingsPage() {
           <button className="btn" onClick={save}>{tr('save')}</button>
           {msg && <p className="page-sub">{msg}</p>}
         </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 12 }}>
+        <h3 style={{ marginTop: 0 }}>{tr('subscription')}</h3>
+        <p className="page-sub">Отдельный listener на subPort (как 3x-ui). UA auto: base64 / Clash / sing-box. Subscription-Userinfo + фильтр expiry/traffic. В проде задайте certFile/keyFile — иначе подписка отдаётся по HTTP (учётки в открытом виде).</p>
+        <div className="field">
+          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={subEnabled}
+              onChange={(e) => setSettings({ ...settings, subEnable: e.target.checked ? 'true' : 'false' })}
+            />
+            subEnable
+          </label>
+        </div>
+        {(['subPort', 'subPath', 'subHost', 'subTitle'] as const).map((k) => (
+          <div className="field" key={k}>
+            <label className="label">{k}</label>
+            <input className="input" value={settings[k] || ''} onChange={(e) => setSettings({ ...settings, [k]: e.target.value })} />
+          </div>
+        ))}
+        {subInfo && (
+          <div className="field">
+            <label className="label">Base URL</label>
+            <input className="input" readOnly value={subInfo.baseUrl + '{subId}'} />
+            <p className="page-sub">Форматы: {subInfo.formats.join(', ')} · порт {subInfo.subPort || '2096'}</p>
+          </div>
+        )}
+        <button className="btn" onClick={save}>{tr('save')}</button>
       </div>
 
       <div className="card" style={{ marginTop: 12 }}>

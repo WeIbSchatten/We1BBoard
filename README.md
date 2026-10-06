@@ -77,7 +77,27 @@ bash <(curl -fsSL https://raw.githubusercontent.com/WeIbSchatten/We1BBoard/main/
 Данные (`/etc/we1bboard`) не трогаются.  
 Релизы: GitHub Actions по тегу `v*` (linux amd64/arm64).
 
+## Подписки (как в 3x-ui)
+
+После установки у каждого клиента есть `subId`. В панели: **Inbounds → Подписка**.
+
+```text
+https://HOST:subPort/sub/<subId>           # auto по User-Agent
+https://HOST:subPort/sub/<subId>/clash
+https://HOST:subPort/sub/<subId>/singbox
+https://HOST:subPort/sub/<subId>/json
+https://HOST:subPort/sub/<subId>?format=base64
+```
+
+- `subEnable` / `subPort` (по умолчанию 2096) / `subPath` / `subHost` / `subTitle` — в Settings  
+- Отдельный HTTPS listener на `subPort` только при настроенных `certFile`/`keyFile`; без TLS подписка монтируется на порт панели (чтобы не открывать второй cleartext-порт с учётками)  
+- `subEnable=false` сразу отключает выдачу (без рестарта)  
+- Заголовок `Subscription-Userinfo` (upload/download/total/expire)  
+- Фильтр истёкших и превысивших трафик клиентов  
+- UA auto: Clash/Stash/Mihomo → Clash YAML; sing-box/SFA → sing-box JSON; иначе base64 URI list  
+
 ## База данных
+
 
 ```bash
 # SQLite (default)

@@ -8,6 +8,7 @@ import (
 	"github.com/we1bboard/we1bboard/internal/database"
 	"github.com/we1bboard/we1bboard/internal/database/model"
 	"github.com/we1bboard/we1bboard/internal/protocol"
+	"github.com/we1bboard/we1bboard/internal/sub"
 	"github.com/we1bboard/we1bboard/internal/web/runtime"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -104,6 +105,9 @@ func (s *ClientService) Create(c *model.Client) error {
 	if c.SubID == "" {
 		c.SubID = strings.ReplaceAll(uuid.NewString(), "-", "")
 	}
+	if !sub.ValidSubID(c.SubID) {
+		return fmt.Errorf("invalid subId (16-64 alphanumeric/_/-)")
+	}
 	if c.Email == "" {
 		c.Email = c.UUID[:8] + "@we1b"
 	}
@@ -117,6 +121,9 @@ func (s *ClientService) Create(c *model.Client) error {
 }
 
 func (s *ClientService) Update(c *model.Client) error {
+	if c.SubID != "" && !sub.ValidSubID(c.SubID) {
+		return fmt.Errorf("invalid subId (16-64 alphanumeric/_/-)")
+	}
 	if err := database.DB.Save(c).Error; err != nil {
 		return err
 	}

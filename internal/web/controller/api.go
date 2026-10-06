@@ -17,6 +17,7 @@ import (
 	"github.com/we1bboard/we1bboard/internal/database/model"
 	"github.com/we1bboard/we1bboard/internal/protocol"
 	"github.com/we1bboard/we1bboard/internal/security"
+	"github.com/we1bboard/we1bboard/internal/sub"
 	"github.com/we1bboard/we1bboard/internal/tgproxy"
 	"github.com/we1bboard/we1bboard/internal/web/middleware"
 	"github.com/we1bboard/we1bboard/internal/web/runtime"
@@ -259,6 +260,36 @@ func (a *API) ClientQR(c *gin.Context) {
 	c.Data(http.StatusOK, "image/png", png)
 }
 
+func (a *API) ClientSub(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	var cl model.Client
+	if err := database.DB.First(&cl, id).Error; err != nil {
+		fail(c, 404, fmt.Errorf("client not found"))
+		return
+	}
+	if !sub.ValidSubID(cl.SubID) {
+		fail(c, 400, fmt.Errorf("client has no subscription id"))
+		return
+	}
+	ok(c, gin.H{
+		"subId":   cl.SubID,
+		"enable":  sub.Enabled(),
+		"baseUrl": sub.PublicBaseURL(""),
+		"urls":    sub.ClientSubURLs(cl.SubID),
+	})
+}
+
+func (a *API) SubscriptionInfo(c *gin.Context) {
+	ok(c, gin.H{
+		"enable":  sub.Enabled(),
+		"subPort": database.GetSetting("subPort"),
+		"subPath": sub.NormalizePath(database.GetSetting("subPath")),
+		"subHost": database.GetSetting("subHost"),
+		"baseUrl": sub.PublicBaseURL(""),
+		"formats": []string{"auto", "base64", "clash", "singbox", "json"},
+	})
+}
+
 func (a *API) GetSettings(c *gin.Context) {
 	m, err := database.AllSettingsPublic()
 	if err != nil {
@@ -281,6 +312,10 @@ func (a *API) UpdateSettings(c *gin.Context) {
 		}
 		if len(v) > 8192 {
 			fail(c, 400, fmt.Errorf("setting %q too large", k))
+			return
+		}
+		if err := sub.ValidateSettings(k, v); err != nil {
+			fail(c, 400, err)
 			return
 		}
 		if err := database.SetSetting(k, v); err != nil {
