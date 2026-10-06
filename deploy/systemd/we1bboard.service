@@ -1,0 +1,15 @@
+[Unit]
+Description=We1BBoard Xray Panel
+After=network.target
+
+[Service]
+Type=simple
+Environment=WE1B_DATA_DIR=/etc/we1bboard
+Environment=WE1B_BIN_DIR=/usr/local/we1bboard/bin
+ExecStart=/usr/local/we1bboard/we1bboard run
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target

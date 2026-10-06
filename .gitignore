@@ -1,0 +1,20 @@
+# Ignore
+*.exe
+*.db
+*.log
+/data/
+/data-test/
+/.we1bboard/
+/frontend/node_modules/
+/frontend/dist/
+
+# Keep embedded UI build output in repo for `go build` without npm
+# (CI also rebuilds before release)
+!/internal/web/dist/
+!/internal/web/dist/**
+
+.DS_Store
+*.tar.gz
+we1bboard
+/tmp/
+*.tsbuildinfo
