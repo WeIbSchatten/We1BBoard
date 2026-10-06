@@ -26,6 +26,8 @@ export type InboundFormState = {
   tlsSNI: string
   tlsALPN: string
   tlsFingerprint: string
+  tlsCertFile: string
+  tlsKeyFile: string
   // reality
   realityDest: string
   realitySNI: string
@@ -43,7 +45,18 @@ export type InboundFormState = {
   sniffRouteOnly: boolean
 }
 
+/** SS2022 password: base64 of 16 (aes-128) or 32 (aes-256 / other) random bytes. */
+export function randomSS2022Password(method: string): string {
+  const n = /128/.test(method) ? 16 : 32
+  const bytes = new Uint8Array(n)
+  crypto.getRandomValues(bytes)
+  let binary = ''
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+  return btoa(binary)
+}
+
 export function emptyInboundForm(): InboundFormState {
+  const ssMethod = '2022-blake3-aes-256-gcm'
   return {
     remark: '',
     port: randomInteger(10000, 60000),
@@ -62,6 +75,8 @@ export function emptyInboundForm(): InboundFormState {
     tlsSNI: '',
     tlsALPN: 'h2,http/1.1',
     tlsFingerprint: 'chrome',
+    tlsCertFile: '',
+    tlsKeyFile: '',
     realityDest: '',
     realitySNI: '',
     realityPrivateKey: '',
@@ -69,8 +84,8 @@ export function emptyInboundForm(): InboundFormState {
     realityShortIds: '',
     realityFingerprint: 'chrome',
     realitySpiderX: '/',
-    ssMethod: '2022-blake3-aes-256-gcm',
-    ssPassword: randomLowerAndNum(32),
+    ssMethod,
+    ssPassword: randomSS2022Password(ssMethod),
     sniffEnabled: false,
     sniffDestOverride: 'http,tls,quic,fakedns',
     sniffRouteOnly: false,
@@ -118,6 +133,11 @@ export function parseInboundToForm(inb: {
     if (alpn?.length) f.tlsALPN = alpn.join(',')
     const tlsSettings = (tls.settings || {}) as Record<string, unknown>
     f.tlsFingerprint = String(tlsSettings.fingerprint || tls.fingerprint || 'chrome')
+    const certs = (tls.certificates || []) as Record<string, unknown>[]
+    if (certs[0]) {
+      f.tlsCertFile = String(certs[0].certificateFile || '')
+      f.tlsKeyFile = String(certs[0].keyFile || '')
+    }
     const rs = (stream.realitySettings || {}) as Record<string, unknown>
     f.realityDest = String(rs.dest || rs.target || '')
     const sns = rs.serverNames as string[] | undefined
@@ -193,7 +213,12 @@ export function buildStreamSettings(f: InboundFormState): string {
       rejectUnknownSni: false,
       allowInsecure: false,
       alpn: f.tlsALPN ? f.tlsALPN.split(',').map((s) => s.trim()).filter(Boolean) : ['h2', 'http/1.1'],
-      certificates: [{ certificateFile: '', keyFile: '', usage: 'encipherment', ocspStapling: 0 }],
+      certificates: [{
+        certificateFile: f.tlsCertFile || '',
+        keyFile: f.tlsKeyFile || '',
+        usage: 'encipherment',
+        ocspStapling: 0,
+      }],
       settings: { fingerprint: f.tlsFingerprint || 'chrome', allowInsecure: false },
     }
   }
@@ -300,3 +325,12 @@ export const SS_METHODS = [
   '2022-blake3-aes-128-gcm', '2022-blake3-aes-256-gcm',
 ]
 export const FINGERPRINTS = ['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'random', 'qq', 'randomized']
+
+const NO_CLIENT_PROTOCOLS = new Set([
+  'wireguard', 'amneziawg', 'wg', 'tun', 'tunnel', 'mtproto', 'tuic', 'hysteria2',
+])
+
+/** Inbounds that can hold panel clients (xray DB-backed user protocols). */
+export function inboundSupportsClients(protocol: string): boolean {
+  return !NO_CLIENT_PROTOCOLS.has(protocol)
+}

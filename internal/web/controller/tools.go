@@ -5,9 +5,14 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
+	"io"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/we1bboard/we1bboard/internal/security"
 )
 
 // RealityKeys generates an X25519 keypair + shortId for REALITY inbounds (3x-ui style).
@@ -47,4 +52,42 @@ func (a *API) RandomUUID(c *gin.Context) {
 			hex.EncodeToString(b[8:10]) + "-" +
 			hex.EncodeToString(b[10:16]),
 	})
+}
+
+const fetchSubMaxBytes = 2 << 20 // 2 MiB
+
+// FetchSub GETs a remote subscription URL (SSRF-guarded) and returns the body.
+func (a *API) FetchSub(c *gin.Context) {
+	var req struct {
+		URL string `json:"url" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	if err := security.ValidateNodeURL(req.URL); err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	client := security.SafeHTTPClient(false, 30*time.Second)
+	resp, err := client.Get(req.URL)
+	if err != nil {
+		fail(c, http.StatusBadGateway, fmt.Errorf("fetch failed: %w", err))
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		fail(c, http.StatusBadGateway, fmt.Errorf("upstream status %d", resp.StatusCode))
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, fetchSubMaxBytes+1))
+	if err != nil {
+		fail(c, http.StatusBadGateway, fmt.Errorf("read failed: %w", err))
+		return
+	}
+	if len(body) > fetchSubMaxBytes {
+		fail(c, http.StatusBadRequest, fmt.Errorf("body exceeds %d bytes", fetchSubMaxBytes))
+		return
+	}
+	ok(c, gin.H{"body": string(body)})
 }

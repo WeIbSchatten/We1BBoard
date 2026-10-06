@@ -1,7 +1,7 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { api, type Client, type Inbound } from '../api'
 import { useApp } from '../AppContext'
-import { parseInboundToForm, suggestedFlow } from '../lib/inboundForm'
+import { inboundSupportsClients, parseInboundToForm, suggestedFlow } from '../lib/inboundForm'
 import { randomLowerAndNum, randomUUID } from '../lib/random'
 
 type Props = {
@@ -15,6 +15,10 @@ type Props = {
 }
 
 type Tab = 'basic' | 'config'
+
+function freshEmail(): string {
+  return `${randomLowerAndNum(8)}@we1b`
+}
 
 export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose, onSaved }: Props) {
   const { tr } = useApp()
@@ -33,7 +37,12 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
-  const selectedInbound = inbound || inbounds?.find((i) => i.id === inboundId) || null
+  const eligibleInbounds = useMemo(
+    () => (inbounds || []).filter((i) => inboundSupportsClients(i.protocol)),
+    [inbounds],
+  )
+
+  const selectedInbound = inbound || eligibleInbounds.find((i) => i.id === inboundId) || null
   const protocol = selectedInbound?.protocol || ''
 
   useEffect(() => {
@@ -55,9 +64,9 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
         setExpiryDays(Math.max(0, Math.ceil((client.expiryTime - Date.now()) / 86400000)))
       } else setExpiryDays(0)
     } else {
-      const ib = inbound || inbounds?.[0] || null
+      const ib = inbound || eligibleInbounds[0] || null
       setInboundId(ib?.id || 0)
-      setEmail(randomLowerAndNum(10))
+      setEmail(freshEmail())
       setUuid(randomUUID())
       setPassword(randomLowerAndNum(16))
       setSubId(randomLowerAndNum(16))
@@ -73,7 +82,7 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
         setFlow('')
       }
     }
-  }, [open, mode, client, inbound, inbounds])
+  }, [open, mode, client, inbound, eligibleInbounds])
 
   async function submit(e: FormEvent) {
     e.preventDefault()
@@ -81,6 +90,10 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
     const id = inbound?.id || inboundId
     if (!id) {
       setError('Select inbound')
+      return
+    }
+    if ((subId || '').length < 16) {
+      setError('Sub ID must be at least 16 characters')
       return
     }
     setBusy(true)
@@ -106,7 +119,7 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
       onSaved()
       onClose()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'error')
+      setError(err instanceof Error ? err.message : 'Failed to save client')
     } finally {
       setBusy(false)
     }
@@ -131,11 +144,11 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
                 <select className="select" value={inboundId} onChange={(e) => {
                   const id = Number(e.target.value)
                   setInboundId(id)
-                  const ib = inbounds?.find((i) => i.id === id)
+                  const ib = eligibleInbounds.find((i) => i.id === id)
                   if (ib) setFlow(suggestedFlow(parseInboundToForm(ib)))
                 }} required>
                   <option value={0}>—</option>
-                  {(inbounds || []).map((i) => (
+                  {eligibleInbounds.map((i) => (
                     <option key={i.id} value={i.id}>#{i.id} {i.remark || i.tag} ({i.protocol}:{i.port})</option>
                   ))}
                 </select>
@@ -145,7 +158,7 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
               <label className="label">Email</label>
               <div className="row-actions">
                 <input className="input" value={email} onChange={(e) => setEmail(e.target.value)} required />
-                <button type="button" className="btn secondary" onClick={() => setEmail(randomLowerAndNum(10))}>↻</button>
+                <button type="button" className="btn secondary" onClick={() => setEmail(freshEmail())}>↻</button>
               </div>
             </div>
             <div className="field">
@@ -183,21 +196,19 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
               </div>
             </div>
             <div className="field">
-              <label className="label">Sub ID</label>
+              <label className="label">Sub ID (≥16)</label>
               <div className="row-actions">
                 <input className="input" value={subId} onChange={(e) => setSubId(e.target.value)} />
                 <button type="button" className="btn secondary" onClick={() => setSubId(randomLowerAndNum(16))}>↻</button>
               </div>
             </div>
-            {(protocol === 'trojan' || protocol === 'shadowsocks' || !protocol) && (
-              <div className="field">
-                <label className="label">{tr('password')}</label>
-                <div className="row-actions">
-                  <input className="input" value={password} onChange={(e) => setPassword(e.target.value)} />
-                  <button type="button" className="btn secondary" onClick={() => setPassword(randomLowerAndNum(16))}>↻</button>
-                </div>
+            <div className="field">
+              <label className="label">{tr('password')}</label>
+              <div className="row-actions">
+                <input className="input" value={password} onChange={(e) => setPassword(e.target.value)} />
+                <button type="button" className="btn secondary" onClick={() => setPassword(randomLowerAndNum(16))}>↻</button>
               </div>
-            )}
+            </div>
             {(protocol === 'vless' || !protocol) && (
               <div className="field">
                 <label className="label">Flow</label>

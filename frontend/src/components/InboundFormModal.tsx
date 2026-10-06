@@ -15,8 +15,13 @@ import {
   buildStreamSettings,
   emptyInboundForm,
   parseInboundToForm,
+  randomSS2022Password,
 } from '../lib/inboundForm'
 import { randomLowerAndNum, randomShortIds, randomSpiderX } from '../lib/random'
+
+function ssPasswordForMethod(method: string): string {
+  return method.startsWith('2022-') ? randomSS2022Password(method) : randomLowerAndNum(32)
+}
 
 type Props = {
   open: boolean
@@ -51,13 +56,16 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
       let next = { ...prev, [key]: value }
       if (key === 'protocol' && mode === 'add') {
         if (value === 'shadowsocks') {
-          next.ssPassword = randomLowerAndNum(32)
           next.ssMethod = '2022-blake3-aes-256-gcm'
+          next.ssPassword = randomSS2022Password(next.ssMethod)
         }
         if (['tun', 'tunnel', 'mtproto', 'tuic', 'hysteria2'].includes(String(value))) {
           next.network = 'tcp'
           next.security = 'none'
         }
+      }
+      if (key === 'ssMethod') {
+        next.ssPassword = ssPasswordForMethod(String(value))
       }
       if (key === 'security') {
         if (value === 'reality') {
@@ -91,6 +99,11 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
     setError('')
     setBusy(true)
     try {
+      if (form.security === 'tls') {
+        if (!form.tlsCertFile.trim() || !form.tlsKeyFile.trim()) {
+          throw new Error('TLS certificate and key file paths are required')
+        }
+      }
       if (form.security === 'reality' && !form.realityPrivateKey) {
         throw new Error('Generate REALITY keys first')
       }
@@ -180,7 +193,7 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
                   <label className="label">{tr('password')}</label>
                   <div className="row-actions">
                     <input className="input" value={form.ssPassword} onChange={(e) => set('ssPassword', e.target.value)} />
-                    <button type="button" className="btn secondary" onClick={() => set('ssPassword', randomLowerAndNum(32))}>↻</button>
+                    <button type="button" className="btn secondary" onClick={() => set('ssPassword', ssPasswordForMethod(form.ssMethod))}>↻</button>
                   </div>
                 </div>
               </>
@@ -272,6 +285,14 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
                 <div className="field">
                   <label className="label">ALPN</label>
                   <input className="input" value={form.tlsALPN} onChange={(e) => set('tlsALPN', e.target.value)} placeholder="h2,http/1.1" />
+                </div>
+                <div className="field">
+                  <label className="label">Cert file path *</label>
+                  <input className="input" value={form.tlsCertFile} onChange={(e) => set('tlsCertFile', e.target.value)} placeholder="/path/to/fullchain.pem" required={form.security === 'tls'} />
+                </div>
+                <div className="field">
+                  <label className="label">Key file path *</label>
+                  <input className="input" value={form.tlsKeyFile} onChange={(e) => set('tlsKeyFile', e.target.value)} placeholder="/path/to/privkey.pem" required={form.security === 'tls'} />
                 </div>
                 <div className="field">
                   <label className="label">Fingerprint</label>

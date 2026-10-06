@@ -199,3 +199,129 @@ export function buildOutboundStream(f: OutboundFormState): string {
 export const OUTBOUND_PROTOCOLS = [
   'vless', 'vmess', 'trojan', 'shadowsocks', 'socks', 'http', 'freedom', 'blackhole',
 ]
+
+const SHARE_LINK_RE = /^(vmess|vless|trojan|ss|hysteria2|hy2|wireguard|wg):\/\//i
+
+function looksLikeBase64Blob(text: string): boolean {
+  const compact = text.replace(/\s+/g, '')
+  if (compact.length < 16) return false
+  if (/:\/\//.test(text)) return false
+  return /^[A-Za-z0-9+/_-]+={0,2}$/.test(compact)
+}
+
+function decodeBase64Blob(text: string): string {
+  const compact = text.replace(/\s+/g, '')
+  const normalized = compact.replace(/-/g, '+').replace(/_/g, '/')
+  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
+  try {
+    if (typeof atob === 'function') {
+      return new TextDecoder().decode(Uint8Array.from(atob(padded), (c) => c.charCodeAt(0)))
+    }
+  } catch { /* fall through */ }
+  return text
+}
+
+/** Extract shareable proxy links from pasted text, a subscription URL, or a base64 blob. */
+export function extractShareLinks(text: string): string[] {
+  const trimmed = text.trim()
+  if (!trimmed) return []
+  if (/^https?:\/\//i.test(trimmed)) return [trimmed]
+
+  let body = trimmed
+  if (looksLikeBase64Blob(trimmed)) {
+    body = decodeBase64Blob(trimmed)
+  }
+
+  return body
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => SHARE_LINK_RE.test(line))
+}
+
+function asRecord(v: unknown): Record<string, unknown> {
+  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
+}
+
+function asArray(v: unknown): Record<string, unknown>[] {
+  return Array.isArray(v) ? (v as Record<string, unknown>[]) : []
+}
+
+/** Map parseOutboundLink result into OutboundFormState. */
+export function applyParsedOutboundLink(
+  parsed: Record<string, unknown>,
+  keepTag?: string,
+): OutboundFormState {
+  const f = emptyOutboundForm()
+  const protocol = String(parsed.protocol || 'vless')
+  f.protocol = protocol === 'hysteria' ? 'hysteria' : protocol
+  const tag = String(parsed.tag || '').trim()
+  f.tag = tag || keepTag || ''
+  f.remark = tag || f.remark
+
+  const settings = asRecord(parsed.settings)
+  // vless flat: {address, port, id, flow}
+  if (settings.address != null || settings.id != null) {
+    f.address = String(settings.address || '')
+    f.port = Number(settings.port || 443)
+    f.uuid = String(settings.id || '')
+    f.flow = String(settings.flow || '')
+    if (settings.password != null) f.password = String(settings.password)
+    if (settings.method != null) f.method = String(settings.method)
+  }
+
+  // vmess/trojan/ss: vnext / servers
+  const servers = asArray(settings.vnext).length
+    ? asArray(settings.vnext)
+    : asArray(settings.servers)
+  if (servers.length > 0) {
+    const first = servers[0] || {}
+    f.address = String(first.address || f.address)
+    f.port = Number(first.port || f.port || 443)
+    if (first.password != null) f.password = String(first.password)
+    if (first.method != null) f.method = String(first.method)
+    if (first.email != null) f.email = String(first.email)
+    const users = asArray(first.users)
+    if (users.length > 0) {
+      const u = users[0] || {}
+      if (u.id != null) f.uuid = String(u.id)
+      if (u.flow != null) f.flow = String(u.flow)
+      if (u.email != null) f.email = String(u.email)
+      if (u.pass != null) f.password = String(u.pass)
+      if (u.user != null) f.email = String(u.user)
+    }
+  }
+
+  const stream = asRecord(parsed.streamSettings)
+  if (Object.keys(stream).length > 0) {
+    f.network = String(stream.network || 'tcp')
+    f.security = String(stream.security || 'none')
+
+    const tls = asRecord(stream.tlsSettings)
+    const reality = asRecord(stream.realitySettings)
+    const sec = Object.keys(reality).length > 0 ? reality : tls
+    f.sni = String(
+      sec.serverName
+      || (Array.isArray(sec.serverNames) ? sec.serverNames[0] : '')
+      || '',
+    )
+    const nested = asRecord(sec.settings)
+    f.publicKey = String(sec.publicKey || nested.publicKey || '')
+    f.shortId = String(
+      (Array.isArray(sec.shortIds) ? sec.shortIds[0] : '')
+      || sec.shortId
+      || '',
+    )
+    f.fingerprint = String(sec.fingerprint || nested.fingerprint || 'chrome') || 'chrome'
+
+    const ws = asRecord(stream.wsSettings)
+    const xhttp = asRecord(stream.xhttpSettings)
+    const headers = asRecord(ws.headers)
+    f.path = String(ws.path || xhttp.path || f.path || '/')
+    f.host = String(ws.host || headers.Host || xhttp.host || '')
+
+    const grpc = asRecord(stream.grpcSettings)
+    f.serviceName = String(grpc.serviceName || '')
+  }
+
+  return f
+}

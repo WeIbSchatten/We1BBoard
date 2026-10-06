@@ -4,11 +4,14 @@ import { useApp } from '../AppContext'
 import {
   OUTBOUND_PROTOCOLS,
   OutboundFormState,
+  applyParsedOutboundLink,
   buildOutboundSettings,
   buildOutboundStream,
   emptyOutboundForm,
+  extractShareLinks,
   parseOutboundToForm,
 } from '../lib/outboundForm'
+import { parseOutboundLink } from '../lib/outboundLinkParser'
 import { FINGERPRINTS, NETWORKS, SECURITIES } from '../lib/inboundForm'
 import { randomUUID } from '../lib/random'
 
@@ -26,6 +29,7 @@ export function OutboundFormModal({ open, mode, outbound, onClose, onSaved }: Pr
   const { tr } = useApp()
   const [tab, setTab] = useState<Tab>('basic')
   const [form, setForm] = useState<OutboundFormState>(emptyOutboundForm())
+  const [paste, setPaste] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -33,6 +37,7 @@ export function OutboundFormModal({ open, mode, outbound, onClose, onSaved }: Pr
     if (!open) return
     setTab('basic')
     setError('')
+    setPaste('')
     if (mode === 'edit' && outbound) {
       setForm(parseOutboundToForm(outbound))
     } else {
@@ -56,6 +61,89 @@ export function OutboundFormModal({ open, mode, outbound, onClose, onSaved }: Pr
   }
 
   const isProxy = !['freedom', 'blackhole'].includes(form.protocol)
+
+  async function resolvePasteToLinks(raw: string): Promise<string[]> {
+    const trimmed = raw.trim()
+    if (!trimmed) return []
+    if (/^https?:\/\//i.test(trimmed)) {
+      const data = await api<{ body: string }>('/tools/fetch-sub', {
+        method: 'POST',
+        body: JSON.stringify({ url: trimmed }),
+      })
+      return extractShareLinks(data.body || '')
+    }
+    return extractShareLinks(trimmed)
+  }
+
+  async function importPaste() {
+    setError('')
+    setBusy(true)
+    try {
+      const links = await resolvePasteToLinks(paste)
+      if (links.length === 0) {
+        throw new Error('No share links found (vmess/vless/trojan/ss/…)')
+      }
+
+      if (links.length === 1) {
+        const parsed = parseOutboundLink(links[0])
+        if (!parsed) throw new Error('Failed to parse share link')
+        const next = applyParsedOutboundLink(parsed, form.tag)
+        if (!OUTBOUND_PROTOCOLS.includes(next.protocol)) {
+          throw new Error(`Unsupported protocol: ${next.protocol}`)
+        }
+        setForm(next)
+        setTab('basic')
+        return
+      }
+
+      const errors: string[] = []
+      let created = 0
+      for (let i = 0; i < links.length; i++) {
+        const tag = `link-${i + 1}`
+        const parsed = parseOutboundLink(links[i])
+        if (!parsed) {
+          errors.push(`${tag}: parse failed`)
+          continue
+        }
+        const f = applyParsedOutboundLink(parsed, tag)
+        if (!f.tag) f.tag = tag
+        if (!OUTBOUND_PROTOCOLS.includes(f.protocol)) {
+          errors.push(`${f.tag}: unsupported protocol ${f.protocol}`)
+          continue
+        }
+        try {
+          await api('/outbounds', {
+            method: 'POST',
+            body: JSON.stringify({
+              tag: f.tag,
+              protocol: f.protocol,
+              enable: f.enable,
+              remark: f.remark || f.tag,
+              settings: buildOutboundSettings(f),
+              streamSettings: buildOutboundStream(f),
+            }),
+          })
+          created++
+        } catch (err) {
+          errors.push(`${f.tag}: ${err instanceof Error ? err.message : 'error'}`)
+        }
+      }
+      if (created === 0) {
+        throw new Error(errors.join('; ') || 'Import failed')
+      }
+      if (errors.length) {
+        setError(`Imported ${created}/${links.length}. Errors: ${errors.join('; ')}`)
+        onSaved()
+        return
+      }
+      onSaved()
+      onClose()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'import error')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault()
@@ -90,6 +178,23 @@ export function OutboundFormModal({ open, mode, outbound, onClose, onSaved }: Pr
     <div className="modal-backdrop" onClick={onClose}>
       <form className="modal" style={{ width: 'min(720px, 100%)' }} onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         <h3>{mode === 'edit' ? tr('edit') : tr('create')} outbound</h3>
+
+        <div className="field" style={{ marginBottom: 12 }}>
+          <label className="label">Paste link / subscription</label>
+          <textarea
+            className="textarea"
+            rows={3}
+            value={paste}
+            onChange={(e) => setPaste(e.target.value)}
+            placeholder="vless://… or multi-link / base64 body / https://…sub"
+          />
+          <div className="row-actions" style={{ marginTop: 8 }}>
+            <button type="button" className="btn secondary" disabled={busy || !paste.trim()} onClick={() => { void importPaste() }}>
+              Import
+            </button>
+          </div>
+        </div>
+
         <div className="tabs" style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
           <button type="button" className={`tab ${tab === 'basic' ? 'active' : ''}`} onClick={() => setTab('basic')}>{tr('tabGeneral')}</button>
           {isProxy && (

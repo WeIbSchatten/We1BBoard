@@ -3,6 +3,7 @@ import { api, type Client, type Inbound } from '../api'
 import { useApp } from '../AppContext'
 import { ClientFormModal } from '../components/ClientFormModal'
 import { InboundFormModal } from '../components/InboundFormModal'
+import { inboundSupportsClients } from '../lib/inboundForm'
 
 export function InboundsPage() {
   const { tr } = useApp()
@@ -144,7 +145,9 @@ export function InboundsPage() {
                     <td><span className={`badge ${r.enable ? 'on' : 'off'}`}>{r.enable ? tr('enable') : tr('disable')}</span></td>
                     <td className="row-actions">
                       <button className="btn secondary" onClick={() => setInboundModal({ open: true, mode: 'edit', inbound: r })}>{tr('edit')}</button>
-                      <button className="btn secondary" onClick={() => setClientModal({ open: true, mode: 'add', inbound: r, client: null })}>+ {tr('clients')}</button>
+                      {inboundSupportsClients(r.protocol) && (
+                        <button className="btn secondary" onClick={() => setClientModal({ open: true, mode: 'add', inbound: r, client: null })}>+ {tr('clients')}</button>
+                      )}
                       <button className="btn danger" onClick={() => removeInbound(r.id)}>{tr('delete')}</button>
                     </td>
                   </tr>
@@ -226,7 +229,7 @@ export function InboundsPage() {
         onClose={() => setInboundModal({ open: false, mode: 'add', inbound: null })}
         onSaved={(created) => {
           void load().then(() => {
-            if (inboundModal.mode === 'add' && created) {
+            if (inboundModal.mode === 'add' && created && inboundSupportsClients(created.protocol)) {
               setExpanded(created.id)
               setPendingClientInbound(created)
             }

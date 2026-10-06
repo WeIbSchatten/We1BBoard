@@ -3,6 +3,7 @@ import { api, type Client, type Inbound } from '../api'
 import { useApp } from '../AppContext'
 import { ClientBulkAddModal } from '../components/ClientBulkAddModal'
 import { ClientFormModal } from '../components/ClientFormModal'
+import { inboundSupportsClients } from '../lib/inboundForm'
 
 type ClientRow = Client & { inboundRemark?: string; inboundProtocol?: string; inboundPort?: number }
 
@@ -23,6 +24,11 @@ export function ClientsPage() {
   }
 
   useEffect(() => { load().catch(console.error) }, [])
+
+  const clientInbounds = useMemo(
+    () => inbounds.filter((i) => inboundSupportsClients(i.protocol)),
+    [inbounds],
+  )
 
   const rows: ClientRow[] = useMemo(() => {
     const list: ClientRow[] = []
@@ -84,11 +90,11 @@ export function ClientsPage() {
           <p className="page-sub">{tr('clientsHint')}</p>
         </div>
         <div className="row-actions">
-          <button className="btn secondary" onClick={() => setBulkOpen(true)} disabled={inbounds.length === 0}>{tr('bulkAdd')}</button>
+          <button className="btn secondary" onClick={() => setBulkOpen(true)} disabled={clientInbounds.length === 0}>{tr('bulkAdd')}</button>
           <button
             className="btn"
             onClick={() => setModal({ open: true, mode: 'add', inbound: null, client: null })}
-            disabled={inbounds.length === 0}
+            disabled={clientInbounds.length === 0}
           >
             {tr('create')}
           </button>
@@ -167,14 +173,14 @@ export function ClientsPage() {
         open={modal.open}
         mode={modal.mode}
         inbound={modal.inbound}
-        inbounds={inbounds}
+        inbounds={clientInbounds}
         client={modal.client}
         onClose={() => setModal({ open: false, mode: 'add', inbound: null, client: null })}
         onSaved={() => { void load() }}
       />
       <ClientBulkAddModal
         open={bulkOpen}
-        inbounds={inbounds}
+        inbounds={clientInbounds}
         onClose={() => setBulkOpen(false)}
         onSaved={() => { void load() }}
       />

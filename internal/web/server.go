@@ -110,6 +110,7 @@ func (s *Server) Start() error {
 			sess.GET("/protocols", api.ListProtocols)
 			sess.GET("/tools/reality-keys", api.RealityKeys)
 			sess.GET("/tools/uuid", api.RandomUUID)
+			sess.POST("/tools/fetch-sub", api.FetchSub)
 
 			sess.GET("/inbounds", api.ListInbounds)
 			sess.POST("/inbounds", api.CreateInbound)

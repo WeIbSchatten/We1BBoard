@@ -59,7 +59,9 @@ func (s *InboundService) Create(in *model.Inbound) error {
 		return err
 	}
 	ufw.SyncInbound(in, false)
-	_ = s.RT.ForNode(in.NodeID).Reload()
+	if err := s.RT.ForNode(in.NodeID).Reload(); err != nil {
+		return fmt.Errorf("inbound saved but xray reload failed: %w", err)
+	}
 	return nil
 }
 
@@ -127,6 +129,15 @@ func (s *ClientService) Create(c *model.Client) error {
 	if c.InboundID == 0 {
 		return fmt.Errorf("inboundId required")
 	}
+	var in model.Inbound
+	if err := database.DB.First(&in, c.InboundID).Error; err != nil {
+		return fmt.Errorf("inbound not found")
+	}
+	switch in.Protocol {
+	case model.ProtoWireGuard, model.ProtoAmneziaWG, model.ProtoTunnel, model.ProtoTUN,
+		model.ProtoMTProto, model.ProtoTUIC, model.ProtoHysteria2:
+		return fmt.Errorf("clients are not supported for protocol %s", in.Protocol)
+	}
 	if c.UUID == "" {
 		c.UUID = uuid.NewString()
 	}
@@ -139,12 +150,21 @@ func (s *ClientService) Create(c *model.Client) error {
 	if c.Email == "" {
 		c.Email = c.UUID[:8] + "@we1b"
 	}
+	// Ensure email is unique enough for xray (email is the client identity key).
+	var exists int64
+	_ = database.DB.Model(&model.Client{}).Where("email = ?", c.Email).Count(&exists).Error
+	if exists > 0 {
+		c.Email = fmt.Sprintf("%s-%s", c.Email, c.UUID[:8])
+	}
+	if c.Password == "" && (in.Protocol == model.ProtoTrojan || in.Protocol == model.ProtoShadowsocks) {
+		c.Password = c.UUID
+	}
 	if err := database.DB.Create(c).Error; err != nil {
 		return err
 	}
-	var in model.Inbound
-	_ = database.DB.First(&in, c.InboundID)
-	_ = s.RT.ForNode(in.NodeID).Reload()
+	if err := s.RT.ForNode(in.NodeID).Reload(); err != nil {
+		return fmt.Errorf("client saved but xray reload failed: %w", err)
+	}
 	return nil
 }
 
@@ -170,7 +190,9 @@ func (s *ClientService) Update(c *model.Client) error {
 	}
 	var in model.Inbound
 	_ = database.DB.First(&in, c.InboundID)
-	_ = s.RT.ForNode(in.NodeID).Reload()
+	if err := s.RT.ForNode(in.NodeID).Reload(); err != nil {
+		return fmt.Errorf("client updated but xray reload failed: %w", err)
+	}
 	return nil
 }
 
