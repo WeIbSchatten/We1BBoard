@@ -142,7 +142,9 @@ func (s *InboundService) Update(in *model.Inbound) error {
 		ufw.DeleteTCP(old.Port)
 	}
 	ufw.SyncInbound(in, false)
-	_ = s.RT.ForNode(in.NodeID).Reload()
+	if err := s.RT.ForNode(in.NodeID).Reload(); err != nil {
+		return fmt.Errorf("inbound saved but xray reload failed: %w", err)
+	}
 	return nil
 }
 

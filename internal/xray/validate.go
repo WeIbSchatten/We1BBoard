@@ -23,6 +23,9 @@ func ValidateStreamSettings(stream map[string]any) error {
 		if strings.TrimSpace(pk) == "" {
 			return fmt.Errorf("reality: privateKey is required")
 		}
+		if _, err := protocol.RealityPublicKeyFromPrivate(pk); err != nil {
+			return fmt.Errorf("reality: invalid privateKey: %w", err)
+		}
 		dest, _ := rs["dest"].(string)
 		target, _ := rs["target"].(string)
 		if strings.TrimSpace(dest) == "" && strings.TrimSpace(target) == "" {
@@ -30,6 +33,18 @@ func ValidateStreamSettings(stream map[string]any) error {
 		}
 		if !hasNonEmptyServerNames(rs["serverNames"]) {
 			return fmt.Errorf("reality: serverNames must be non-empty")
+		}
+		if !hasShortIds(rs["shortIds"]) {
+			return fmt.Errorf("reality: shortIds is required (use [\"\"] to allow empty client shortId)")
+		}
+		network, _ := stream["network"].(string)
+		if network == "" {
+			network = "tcp"
+		}
+		switch strings.ToLower(network) {
+		case "tcp", "raw", "xhttp", "splithttp", "grpc", "gun":
+		default:
+			return fmt.Errorf("reality: network %q is not supported (use tcp, xhttp, or grpc)", network)
 		}
 	case "tls":
 		ts, _ := stream["tlsSettings"].(map[string]any)
@@ -63,6 +78,18 @@ func hasNonEmptyServerNames(v any) bool {
 				return true
 			}
 		}
+	}
+	return false
+}
+
+func hasShortIds(v any) bool {
+	switch ids := v.(type) {
+	case []any:
+		return len(ids) > 0
+	case []string:
+		return len(ids) > 0
+	case string:
+		return true // single value present
 	}
 	return false
 }

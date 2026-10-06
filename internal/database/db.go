@@ -206,6 +206,8 @@ func seed(db *gorm.DB) error {
 		"subPath":      "/sub/",
 		"subEnable":    "true",
 		"subHost":      "",
+		"subURI":       "",
+		"subForceTLS":  "false",
 		"subTitle":      "We1BBoard",
 		"subSupportUrl": "",
 		"subThemeDir":   "",
@@ -379,7 +381,7 @@ func AllSettings() (map[string]string, error) {
 // AllowedSettingKeys — whitelist for panel UI updates (secrets excluded).
 var AllowedSettingKeys = map[string]bool{
 	"panelPort": true, "panelPath": true, "webListen": true,
-	"subPort": true, "subPath": true, "subEnable": true, "subHost": true, "subTitle": true, "subSupportUrl": true, "subThemeDir": true, "subAnnounce": true,
+	"subPort": true, "subPath": true, "subEnable": true, "subHost": true, "subURI": true, "subForceTLS": true, "subTitle": true, "subSupportUrl": true, "subThemeDir": true, "subAnnounce": true,
 	"subJsonEnable": true, "subClashEnable": true,
 	"clientGroups": true,
 	"ufwEnable": true,

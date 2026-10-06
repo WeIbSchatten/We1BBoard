@@ -27,14 +27,20 @@ func EqualSecret(a, b string) bool {
 // ValidShareHost allows hostname or IP for subscription/share links (no URLs/paths).
 func ValidShareHost(host string) bool {
 	host = strings.TrimSpace(host)
+	host = strings.TrimPrefix(host, "[")
+	host = strings.TrimSuffix(host, "]")
 	if host == "" || len(host) > 253 {
 		return false
 	}
-	if strings.ContainsAny(host, "/:\\@?#%") {
+	if strings.ContainsAny(host, "/\\@?#%") {
 		return false
 	}
 	if ip := net.ParseIP(host); ip != nil {
 		return true
+	}
+	// reject bare colon leftovers (must be hostname now)
+	if strings.Contains(host, ":") {
+		return false
 	}
 	// basic hostname
 	for _, p := range strings.Split(host, ".") {

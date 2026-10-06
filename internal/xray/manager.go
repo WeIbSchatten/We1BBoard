@@ -13,6 +13,7 @@ import (
 
 	"github.com/we1bboard/we1bboard/internal/database"
 	"github.com/we1bboard/we1bboard/internal/database/model"
+	"github.com/we1bboard/we1bboard/internal/panellog"
 	"github.com/we1bboard/we1bboard/internal/protocol"
 	"github.com/we1bboard/we1bboard/internal/supervisor"
 )
@@ -266,11 +267,40 @@ func buildXrayInbound(in *model.Inbound) (map[string]any, *ConfigIssue) {
 	if err := ValidateStreamSettings(stream); err != nil {
 		return nil, &ConfigIssue{Tag: tag, Reason: err.Error()}
 	}
-	obj, err := adap.ToXrayInbound(in, in.Clients)
+	// Keep DB stream intact for share links; only sanitize what Xray receives.
+	sanitized := *in
+	sanitized.StreamSettings = protocol.SanitizeInboundStreamJSON(in.StreamSettings)
+	obj, err := adap.ToXrayInbound(&sanitized, in.Clients)
 	if err != nil {
 		return nil, &ConfigIssue{Tag: tag, Reason: "ToXrayInbound: " + err.Error()}
 	}
+	// Also strip client-only fields from VLESS/etc client maps (limitIp is panel-only).
+	if obj != nil {
+		stripPanelOnlyClientFields(obj)
+	}
 	return obj, nil
+}
+
+func stripPanelOnlyClientFields(obj map[string]any) {
+	settings, _ := obj["settings"].(map[string]any)
+	if settings == nil {
+		return
+	}
+	if clients, ok := settings["clients"].([]map[string]any); ok {
+		for _, c := range clients {
+			delete(c, "limitIp")
+			delete(c, "limitip")
+		}
+		return
+	}
+	if raw, ok := settings["clients"].([]any); ok {
+		for _, item := range raw {
+			if c, ok := item.(map[string]any); ok {
+				delete(c, "limitIp")
+				delete(c, "limitip")
+			}
+		}
+	}
 }
 
 // ConfigIssues returns enabled inbounds that would be skipped when generating config.
@@ -398,7 +428,38 @@ func (m *Manager) Start() error {
 	}
 	m.proc = supervisor.New("xray", m.Bin, "run", "-c", m.ConfigPath())
 	m.proc.SetLog(logW)
-	return m.proc.Start()
+	m.proc.OnExit = func(err error) {
+		if err != nil {
+			panellog.Append("xray exited: %v — see Logs → process / error", err)
+		} else {
+			panellog.Append("xray exited cleanly")
+		}
+	}
+	if err := m.proc.StartAndWaitHealthy(900 * time.Millisecond); err != nil {
+		tail := m.tailProcessLog(40)
+		_ = m.proc.Stop()
+		if tail != "" {
+			panellog.Append("xray start failed:\n%s", tail)
+			return fmt.Errorf("%w\n--- process.log ---\n%s", err, tail)
+		}
+		panellog.Append("xray start failed: %v", err)
+		return err
+	}
+	panellog.Append("xray started")
+	return nil
+}
+
+func (m *Manager) tailProcessLog(maxLines int) string {
+	path := filepath.Join(m.ConfigDir, "process.log")
+	b, err := os.ReadFile(path)
+	if err != nil || len(b) == 0 {
+		return ""
+	}
+	lines := strings.Split(strings.ReplaceAll(string(b), "\r\n", "\n"), "\n")
+	if len(lines) > maxLines {
+		lines = lines[len(lines)-maxLines:]
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 func (m *Manager) Stop() error {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -166,7 +167,13 @@ func splitHostPortSafe(hostport string) (host, port string, err error) {
 
 // PublicBaseURL builds the subscription base URL (without subId).
 // hintHost is used when subHost setting is empty (typically the panel request Host).
+//
+// If setting subURI is set (3x-ui style), it overrides host/port/scheme entirely.
+// Examples: https://vpn.example.com:2096  or  https://vpn.example.com/sub/
 func PublicBaseURL(hintHost string) string {
+	if uri := strings.TrimSpace(database.GetSetting("subURI")); uri != "" {
+		return normalizeSubURI(uri)
+	}
 	host := DefaultShareHost(hintHost)
 	port := EffectiveSubPort()
 	path := NormalizePath(database.GetSetting("subPath"))
@@ -174,10 +181,35 @@ func PublicBaseURL(hintHost string) string {
 	if database.GetSetting("certFile") != "" && database.GetSetting("keyFile") != "" {
 		scheme = "https"
 	}
+	// Behind reverse proxy without local certs: allow forcing https via setting.
+	if v := strings.ToLower(strings.TrimSpace(database.GetSetting("subForceTLS"))); v == "true" || v == "1" || v == "yes" || v == "on" {
+		scheme = "https"
+	}
 	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
 		return fmt.Sprintf("%s://%s%s", scheme, host, path)
 	}
 	return fmt.Sprintf("%s://%s:%s%s", scheme, host, port, path)
+}
+
+func normalizeSubURI(uri string) string {
+	uri = strings.TrimSpace(uri)
+	if !strings.Contains(uri, "://") {
+		uri = "https://" + uri
+	}
+	u, err := url.Parse(uri)
+	if err != nil || u.Host == "" {
+		path := NormalizePath(database.GetSetting("subPath"))
+		return strings.TrimRight(uri, "/") + path
+	}
+	path := NormalizePath(database.GetSetting("subPath"))
+	// If user already included a path (e.g. /sub/), keep it; else append subPath.
+	if u.Path == "" || u.Path == "/" {
+		u.Path = strings.TrimSuffix(path, "/")
+	}
+	if !strings.HasSuffix(u.Path, "/") {
+		u.Path += "/"
+	}
+	return u.String()
 }
 
 // ClientSubURLs returns absolute subscription links for a subId.
@@ -200,7 +232,7 @@ type subEntry struct {
 	Name    string
 }
 
-func (s *Server) resolve(subID string) ([]subEntry, error) {
+func (s *Server) resolve(subID, shareHost string) ([]subEntry, error) {
 	if !ValidSubID(subID) {
 		return nil, errNotFound
 	}
@@ -233,7 +265,12 @@ func (s *Server) resolve(subID string) ([]subEntry, error) {
 			imap[in.ID] = in
 		}
 	}
-	host := s.host()
+	host := strings.TrimSpace(shareHost)
+	if host == "" {
+		host = s.host()
+	} else {
+		host = DefaultShareHost(host)
+	}
 	out := make([]subEntry, 0, len(clients)*2)
 	seenExtra := map[string]bool{}
 	hosts, _ := loadEnabledHosts()
@@ -286,6 +323,14 @@ func (s *Server) resolve(subID string) ([]subEntry, error) {
 		}
 	}
 	return out, nil
+}
+
+// requestShareHost picks address for share links inside a subscription fetch.
+func requestShareHost(c *gin.Context) string {
+	if h := strings.TrimSpace(c.Query("host")); h != "" && security.ValidShareHost(stripHostPort(h)) {
+		return stripHostPort(h)
+	}
+	return DefaultShareHost(c.Request.Host)
 }
 
 func loadEnabledHosts() ([]model.Host, error) {
@@ -426,7 +471,7 @@ func (s *Server) handleAuto(c *gin.Context) {
 	if s.maybeServeSubPage(c, subID) {
 		return
 	}
-	entries, err := s.resolve(subID)
+	entries, err := s.resolve(subID, requestShareHost(c))
 	if err != nil {
 		if err == errNotFound {
 			c.Status(http.StatusNotFound)
@@ -465,7 +510,7 @@ func (s *Server) handleJSON(c *gin.Context) {
 	if s.maybeServeSubPage(c, subID) {
 		return
 	}
-	entries, err := s.resolve(subID)
+	entries, err := s.resolve(subID, requestShareHost(c))
 	if err != nil {
 		if err == errNotFound {
 			c.Status(http.StatusNotFound)
@@ -487,7 +532,7 @@ func (s *Server) handleClash(c *gin.Context) {
 	if s.maybeServeSubPage(c, subID) {
 		return
 	}
-	entries, err := s.resolve(subID)
+	entries, err := s.resolve(subID, requestShareHost(c))
 	if err != nil {
 		if err == errNotFound {
 			c.Status(http.StatusNotFound)
@@ -505,7 +550,7 @@ func (s *Server) handleSingBox(c *gin.Context) {
 	if s.maybeServeSubPage(c, subID) {
 		return
 	}
-	entries, err := s.resolve(subID)
+	entries, err := s.resolve(subID, requestShareHost(c))
 	if err != nil {
 		if err == errNotFound {
 			c.Status(http.StatusNotFound)
@@ -519,6 +564,10 @@ func (s *Server) handleSingBox(c *gin.Context) {
 }
 
 func (s *Server) respondBase64(c *gin.Context, entries []subEntry) {
+	if len(entries) == 0 {
+		c.Status(http.StatusNotFound)
+		return
+	}
 	lines := make([]string, 0, len(entries))
 	for _, e := range entries {
 		lines = append(lines, e.Link)
@@ -1078,13 +1127,28 @@ func ValidateSettings(key, value string) error {
 		default:
 			return fmt.Errorf("invalid subEnable")
 		}
-	case "subJsonEnable", "subClashEnable", "tgBotEnable", "tgNotifyLogin", "tgNotifyTraffic", "twoFactorEnable",
+	case "subJsonEnable", "subClashEnable", "subForceTLS", "tgBotEnable", "tgNotifyLogin", "tgNotifyTraffic", "twoFactorEnable",
 		"emailEnable", "emailNotifyLogin", "emailNotifyTraffic", "discordEnable", "discordNotifyLogin", "discordNotifyTraffic":
 		v := strings.ToLower(strings.TrimSpace(value))
 		switch v {
 		case "true", "false", "1", "0", "yes", "no", "on", "off", "":
 		default:
 			return fmt.Errorf("invalid %s", key)
+		}
+	case "subURI":
+		v := strings.TrimSpace(value)
+		if v == "" {
+			return nil
+		}
+		if len(v) > 512 || strings.ContainsAny(v, " \t\r\n") {
+			return fmt.Errorf("invalid subURI")
+		}
+		if !strings.Contains(v, "://") {
+			v = "https://" + v
+		}
+		u, err := url.Parse(v)
+		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+			return fmt.Errorf("invalid subURI")
 		}
 	case "smtpPort":
 		v := strings.TrimSpace(value)

@@ -40,6 +40,8 @@ const LABELS: Record<string, string> = {
   subPort: 'Subscription port',
   subPath: 'Subscription path',
   subHost: 'Subscription host',
+  subURI: 'Public subscription URI',
+  subForceTLS: 'Force HTTPS in subscription URLs',
   subTitle: 'Subscription title',
   subSupportUrl: 'Support URL',
   subThemeDir: 'Custom theme directory',
@@ -320,6 +322,27 @@ export function SettingsPage() {
           <label className="label">{label('subHost')}</label>
           <input className="input" value={settings.subHost || ''} onChange={(e) => setSettings({ ...settings, subHost: e.target.value })} />
           <p className="page-sub">{tr('subHostHint')}</p>
+        </div>
+        <div className="field">
+          <label className="label">{label('subURI')}</label>
+          <input
+            className="input"
+            value={settings.subURI || ''}
+            onChange={(e) => setSettings({ ...settings, subURI: e.target.value })}
+            placeholder="https://vpn.example.com:2096"
+          />
+          <p className="page-sub">{tr('subURIHint')}</p>
+        </div>
+        <div className="field">
+          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8, textTransform: 'none', letterSpacing: 0 }}>
+            <input
+              type="checkbox"
+              checked={(settings.subForceTLS || 'false') === 'true'}
+              onChange={(e) => setSettings({ ...settings, subForceTLS: e.target.checked ? 'true' : 'false' })}
+            />
+            {label('subForceTLS')}
+          </label>
+          <p className="page-sub">{tr('subForceTLSHint')}</p>
         </div>
         {(['subTitle', 'subSupportUrl', 'subThemeDir', 'subAnnounce'] as const).map((k) => (
           <div className="field" key={k}>

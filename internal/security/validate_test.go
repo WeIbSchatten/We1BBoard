@@ -17,7 +17,7 @@ func TestEqualSecret(t *testing.T) {
 func equalSecret(a, b string) bool { return EqualSecret(a, b) }
 
 func TestValidShareHost(t *testing.T) {
-	for _, h := range []string{"example.com", "sub.example.com", "1.2.3.4"} {
+	for _, h := range []string{"example.com", "sub.example.com", "1.2.3.4", "2001:db8::1", "[2001:db8::1]"} {
 		if !ValidShareHost(h) {
 			t.Fatalf("expected ok: %s", h)
 		}

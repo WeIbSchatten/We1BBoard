@@ -41,7 +41,7 @@ func (s *Server) maybeServeSubPage(c *gin.Context, subID string) bool {
 	if !want {
 		return false
 	}
-	entries, err := s.resolve(subID)
+	entries, err := s.resolve(subID, requestShareHost(c))
 	if err != nil {
 		if err == errNotFound {
 			c.Status(http.StatusNotFound)
@@ -183,7 +183,7 @@ func (s *Server) handleQR(c *gin.Context) {
 		return
 	}
 	// Ensure subId exists (enabled clients) without leaking configs
-	entries, err := s.resolve(subID)
+	entries, err := s.resolve(subID, requestShareHost(c))
 	if err != nil || len(entries) == 0 {
 		c.Status(http.StatusNotFound)
 		return
@@ -200,7 +200,7 @@ func (s *Server) handleQR(c *gin.Context) {
 
 // serveInfoJSON returns live status for custom templates (?format=info), without links.
 func (s *Server) serveInfoJSON(c *gin.Context, subID string) {
-	entries, err := s.resolve(subID)
+	entries, err := s.resolve(subID, requestShareHost(c))
 	if err != nil {
 		if err == errNotFound {
 			c.Status(http.StatusNotFound)
