@@ -107,13 +107,13 @@ export function SettingsPage() {
             subEnable
           </label>
         </div>
-        {(['subPort', 'subPath', 'subHost', 'subTitle', 'subSupportUrl'] as const).map((k) => (
+        {(['subPort', 'subPath', 'subHost', 'subTitle', 'subSupportUrl', 'subThemeDir', 'subAnnounce'] as const).map((k) => (
           <div className="field" key={k}>
             <label className="label">{k}</label>
-            <input className="input" value={settings[k] || ''} onChange={(e) => setSettings({ ...settings, [k]: e.target.value })} />
+            <input className="input" value={settings[k] || ''} onChange={(e) => setSettings({ ...settings, [k]: e.target.value })} placeholder={k === 'subThemeDir' ? '/etc/we1bboard/sub_templates/my-theme' : undefined} />
           </div>
         ))}
-        <p className="page-sub">В браузере URL подписки открывает HTML-страницу (копирование ссылок + QR). VPN-клиенты получают raw. Полная страница с конфигами: добавьте <code>?html=1</code>.</p>
+        <p className="page-sub">В браузере URL подписки открывает HTML-страницу (копирование ссылок + QR). VPN-клиенты получают raw. Полная страница с конфигами: <code>?html=1</code>. Кастомный шаблон: абсолютный путь к папке с <code>sub.html</code> или <code>index.html</code> (как 3x-ui).</p>
         {subInfo && (
           <div className="field">
             <label className="label">Base URL</label>

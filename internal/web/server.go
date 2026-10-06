@@ -157,18 +157,25 @@ func (s *Server) Start() error {
 		}
 	}
 
-	// Remote-node compatibility alias (safe path join, no ..)
-	r.Any("/panel/api/*filepath", func(c *gin.Context) {
-		p := c.Param("filepath")
-		clean := path.Clean("/" + strings.TrimPrefix(p, "/"))
-		if strings.Contains(clean, "..") {
-			c.AbortWithStatus(400)
-			return
-		}
-		target := panelPath + "api" + clean
-		c.Request.URL.Path = target
-		r.HandleContext(c)
-	})
+	// Remote-node compatibility alias (safe path join, no ..).
+	// Skip when panelPath is /panel/ — alias would recurse via HandleContext.
+	if panelPath != "/panel/" {
+		r.Any("/panel/api/*filepath", func(c *gin.Context) {
+			p := c.Param("filepath")
+			clean := path.Clean("/" + strings.TrimPrefix(p, "/"))
+			if strings.Contains(clean, "..") {
+				c.AbortWithStatus(400)
+				return
+			}
+			target := path.Clean(panelPath+"api") + clean
+			if target == c.Request.URL.Path || strings.HasPrefix(target, "/panel/api") {
+				c.AbortWithStatus(404)
+				return
+			}
+			c.Request.URL.Path = target
+			r.HandleContext(c)
+		})
+	}
 
 	subPath := sub.NormalizePath(database.GetSetting("subPath"))
 	subPort := database.GetSetting("subPort")

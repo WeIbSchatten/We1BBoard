@@ -492,8 +492,7 @@ func (a *API) DeleteNode(c *gin.Context) {
 
 func (a *API) PingNodes(c *gin.Context) {
 	a.RT.PingNodes()
-	rows, _ := a.Node.List()
-	ok(c, rows)
+	a.ListNodes(c) // reuse masked DTO — never echo full node tokens
 }
 
 func (a *API) ListBridges(c *gin.Context) {

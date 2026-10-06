@@ -151,13 +151,16 @@ func seed(db *gorm.DB) error {
 	var count int64
 	db.Model(&model.User{}).Count(&count)
 	if count == 0 {
-		hash, err := bcrypt.GenerateFromPassword([]byte("admin"), bcrypt.DefaultCost)
+		pass := mustRandomPassword(16)
+		hash, err := bcrypt.GenerateFromPassword([]byte(pass), bcrypt.DefaultCost)
 		if err != nil {
 			return err
 		}
 		if err := db.Create(&model.User{Username: "admin", PasswordHash: string(hash)}).Error; err != nil {
 			return err
 		}
+		writeInstallCredentials("admin", pass)
+		log.Printf("We1BBoard initial admin created — username=admin password=%s (also written to install-result.env)", pass)
 	}
 	defaults := map[string]string{
 		"panelPort":    "2053",
@@ -169,6 +172,8 @@ func seed(db *gorm.DB) error {
 		"subHost":      "",
 		"subTitle":      "We1BBoard",
 		"subSupportUrl": "",
+		"subThemeDir":   "",
+		"subAnnounce":   "",
 		"theme":         "night",
 		"accent":       "blue",
 		"lang":         "ru",
@@ -212,6 +217,30 @@ func mustRandomSecret() string {
 		panic("crypto/rand unavailable")
 	}
 	return hex.EncodeToString(b)
+}
+
+func mustRandomPassword(n int) string {
+	const alphabet = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand unavailable")
+	}
+	out := make([]byte, n)
+	for i := range out {
+		out[i] = alphabet[int(b[i])%len(alphabet)]
+	}
+	return string(out)
+}
+
+func writeInstallCredentials(user, pass string) {
+	dir := os.Getenv("WE1B_DATA_DIR")
+	if dir == "" {
+		dir = "/etc/we1bboard"
+	}
+	_ = os.MkdirAll(dir, 0o755)
+	path := filepath.Join(dir, "install-result.env")
+	body := fmt.Sprintf("WE1B_USERNAME=%q\nWE1B_PASSWORD=%q\n", user, pass)
+	_ = os.WriteFile(path, []byte(body), 0o600)
 }
 
 func GetSetting(key string) string {
@@ -272,7 +301,7 @@ func AllSettings() (map[string]string, error) {
 // AllowedSettingKeys — whitelist for panel UI updates (secrets excluded).
 var AllowedSettingKeys = map[string]bool{
 	"panelPort": true, "panelPath": true, "webListen": true,
-	"subPort": true, "subPath": true, "subEnable": true, "subHost": true, "subTitle": true, "subSupportUrl": true,
+	"subPort": true, "subPath": true, "subEnable": true, "subHost": true, "subTitle": true, "subSupportUrl": true, "subThemeDir": true, "subAnnounce": true,
 	"theme": true, "accent": true, "lang": true,
 	"xrayTemplate": true, "certFile": true, "keyFile": true,
 	"trafficCron": true,

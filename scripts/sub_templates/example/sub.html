@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>{{.subTitle}} — Subscription</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+    code { word-break: break-all; display: block; background: #f4f4f5; padding: .5rem; margin: .4rem 0; }
+    .muted { color: #666; }
+  </style>
+</head>
+<body>
+  <h1>{{.subTitle}}</h1>
+  <p class="muted">{{if .enabled}}Active{{else}}Inactive{{end}} · used <span id="used">{{.used}}</span> / {{if eq .totalByte 0}}∞{{else}}{{.total}}{{end}}</p>
+  {{if .announce}}<p>{{.announce}}</p>{{end}}
+
+  <h3>Subscription URL</h3>
+  <code>{{.subUrl}}</code>
+  <p class="muted">Clash: {{.subClashUrl}}</p>
+  <p class="muted">sing-box: {{.subSingboxUrl}}</p>
+
+  {{if .qrDataUrl}}<p><img alt="qr" width="180" height="180" src="{{.qrDataUrl}}"/></p>{{end}}
+
+  {{if .links}}
+  <h3>Configs</h3>
+  {{range .links}}<code>{{.}}</code>{{end}}
+  {{else}}
+  <p class="muted">Configs are hidden on normal browser open. Use <code>?html=1</code> to show them.</p>
+  {{end}}
+
+  {{if .subSupportUrl}}<p><a href="{{.subSupportUrl}}" rel="noopener noreferrer">Support</a></p>{{end}}
+
+  <script>
+    async function refresh() {
+      const r = await fetch(location.pathname + '?format=info');
+      if (!r.ok) return;
+      const info = await r.json();
+      const el = document.getElementById('used');
+      if (el) el.textContent = info.used;
+    }
+    setInterval(refresh, 15000);
+  </script>
+</body>
+</html>

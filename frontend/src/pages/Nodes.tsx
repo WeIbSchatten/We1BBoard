@@ -6,7 +6,7 @@ export function NodesPage() {
   const { tr } = useApp()
   const [rows, setRows] = useState<Node[]>([])
   const [open, setOpen] = useState(false)
-  const [form, setForm] = useState({ name: '', url: '', token: '', tlsMode: 'skip', region: 'eu', enable: true })
+  const [form, setForm] = useState({ name: '', url: '', token: '', tlsMode: 'verify', region: 'eu', enable: true })
 
   async function load() { setRows(await api<Node[]>('/nodes')) }
   useEffect(() => { load().catch(console.error) }, [])
@@ -71,8 +71,8 @@ export function NodesPage() {
             <div className="field">
               <label className="label">TLS mode</label>
               <select className="select" value={form.tlsMode} onChange={(e) => setForm({ ...form, tlsMode: e.target.value })}>
-                <option value="skip">skip</option>
-                <option value="verify">verify</option>
+                <option value="verify">verify (recommended)</option>
+                <option value="skip">skip (insecure)</option>
                 <option value="pin">pin</option>
                 <option value="mtls">mtls</option>
               </select>

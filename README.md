@@ -93,6 +93,7 @@ https://HOST:subPort/sub/<subId>?format=base64
 
 - `subEnable` / `subPort` (по умолчанию 2096) / `subPath` / `subHost` / `subTitle` / `subSupportUrl` — в Settings  
 - HTML-страница подписки (как 3x-ui): трафик, expiry, copy URL, QR; в браузере — copy-only без встроенных конфигов; `?html=1` — полная  
+- Кастомный HTML: `subThemeDir` → папка с `sub.html` / `index.html` ([docs](docs/custom-subscription-templates.md)); `?format=info` для live-статуса  
 - Отдельный HTTPS listener на `subPort` только при настроенных `certFile`/`keyFile`; без TLS подписка монтируется на порт панели (чтобы не открывать второй cleartext-порт с учётками)  
 - `subEnable=false` сразу отключает выдачу (без рестарта)  
 - Заголовок `Subscription-Userinfo` (upload/download/total/expire)  

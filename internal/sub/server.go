@@ -260,6 +260,10 @@ func detectFormat(ua, formatQ string) string {
 
 func (s *Server) handleAuto(c *gin.Context) {
 	subID := c.Param("subId")
+	if strings.EqualFold(c.Query("format"), "info") {
+		s.serveInfoJSON(c, subID)
+		return
+	}
 	if s.maybeServeSubPage(c, subID) {
 		return
 	}
@@ -703,6 +707,20 @@ func ValidateSettings(key, value string) error {
 		}
 		if strings.ContainsAny(v, " \t\r\n\"'<>") {
 			return fmt.Errorf("invalid subSupportUrl")
+		}
+	case "subThemeDir":
+		return ValidateThemeDir(value)
+	case "subAnnounce":
+		if len(value) > 2048 {
+			return fmt.Errorf("subAnnounce too long")
+		}
+	case "panelPath":
+		p := NormalizePath(value)
+		if p == "/panel/" {
+			return fmt.Errorf("panelPath /panel/ conflicts with remote-node API alias")
+		}
+		if p == "/" {
+			return fmt.Errorf("panelPath must not be root /")
 		}
 	}
 	return nil

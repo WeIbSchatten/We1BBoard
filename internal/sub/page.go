@@ -56,23 +56,31 @@ func (s *Server) maybeServeSubPage(c *gin.Context, subID string) bool {
 
 func (s *Server) serveHTMLPage(c *gin.Context, subID string, entries []subEntry, full bool) {
 	urls := ClientSubURLs(subID)
-	pd := buildPageData(subID, entries, urls, full)
+	pd, up, down, total := buildPageData(subID, entries, urls, full)
 
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	c.Header("Content-Security-Policy",
-		"default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+		"default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; script-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.Header("Cache-Control", "no-store")
 
 	var buf bytes.Buffer
-	if err := subPageTmpl.Execute(&buf, pd); err != nil {
-		c.String(http.StatusInternalServerError, "error")
-		return
+	if tmpl, err := loadCustomTheme(); err == nil && tmpl != nil {
+		if err := tmpl.Execute(&buf, customPageVM(pd, up, down, total)); err != nil {
+			// malformed custom theme → fall back to built-in
+			buf.Reset()
+			_ = subPageTmpl.Execute(&buf, pd)
+		}
+	} else {
+		if err := subPageTmpl.Execute(&buf, pd); err != nil {
+			c.String(http.StatusInternalServerError, "error")
+			return
+		}
 	}
 	c.Data(http.StatusOK, "text/html; charset=utf-8", buf.Bytes())
 }
 
-func buildPageData(subID string, entries []subEntry, urls map[string]string, full bool) pageData {
+func buildPageData(subID string, entries []subEntry, urls map[string]string, full bool) (pageData, int64, int64, int64) {
 	title := database.GetSetting("subTitle")
 	if title == "" {
 		title = "We1BBoard"
@@ -128,7 +136,7 @@ func buildPageData(subID string, entries []subEntry, urls map[string]string, ful
 		expireStr = time.Unix(expire, 0).UTC().Format("2006-01-02 15:04 UTC")
 	}
 
-	return pageData{
+	pd := pageData{
 		Title:      title,
 		SubID:      subID,
 		Full:       full,
@@ -149,6 +157,7 @@ func buildPageData(subID string, entries []subEntry, urls map[string]string, ful
 		Emails:     emails,
 		SupportURL: support,
 	}
+	return pd, up, down, total
 }
 
 func formatBytes(n int64) string {
@@ -187,6 +196,25 @@ func (s *Server) handleQR(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "no-store")
 	c.Data(http.StatusOK, "image/png", png)
+}
+
+// serveInfoJSON returns live status for custom templates (?format=info), without links.
+func (s *Server) serveInfoJSON(c *gin.Context, subID string) {
+	entries, err := s.resolve(subID)
+	if err != nil {
+		if err == errNotFound {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "error"})
+		return
+	}
+	pd, up, down, total := buildPageData(subID, entries, ClientSubURLs(subID), false)
+	vm := customPageVM(pd, up, down, total)
+	delete(vm, "links")
+	delete(vm, "Links")
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, vm)
 }
 
 var subPageTmpl = template.Must(template.New("subpage").Funcs(template.FuncMap{

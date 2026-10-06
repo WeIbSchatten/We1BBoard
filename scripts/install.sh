@@ -515,7 +515,17 @@ configure_panel() {
   prompt port "Panel port" "2053"
   prompt path "Panel base path" "/we1b/"
   prompt user "Admin username" "admin"
-  prompt pass "Admin password (min 8 chars)" "adminadmin"
+  local default_pass
+  default_pass="$(openssl rand -base64 18 2>/dev/null | tr -dc 'A-Za-z0-9' | head -c 16)"
+  if [[ -z "${default_pass}" || ${#default_pass} -lt 12 ]]; then
+    default_pass="$(head -c 32 /dev/urandom 2>/dev/null | od -An -tx1 | tr -d ' \n' | head -c 16)"
+  fi
+  if [[ "${NONINTERACTIVE}" == "1" ]]; then
+    pass="${WE1B_ADMIN_PASSWORD:-${default_pass}}"
+    user="${WE1B_ADMIN_USER:-admin}"
+  else
+    prompt pass "Admin password (min 8 chars)" "${default_pass}"
+  fi
   if [[ ${#pass} -lt 8 ]]; then
     err "password must be at least 8 characters"
     exit 1
@@ -535,6 +545,19 @@ configure_panel() {
   "${BIN_PATH}" setting set theme "${theme}"
   "${BIN_PATH}" setting set accent "${accent}"
   "${BIN_PATH}" reset-admin "${user}" "${pass}"
+
+  umask 077
+  cat > "${DATA_DIR}/install-result.env" <<EOF
+WE1B_USERNAME=$(printf '%q' "${user}")
+WE1B_PASSWORD=$(printf '%q' "${pass}")
+WE1B_PANEL_PORT=$(printf '%q' "${port}")
+WE1B_PANEL_PATH=$(printf '%q' "${path}")
+EOF
+  chmod 600 "${DATA_DIR}/install-result.env"
+  log "Credentials saved to ${DATA_DIR}/install-result.env (mode 600)"
+  if [[ "${NONINTERACTIVE}" == "1" ]]; then
+    log "Admin: ${user} / (see install-result.env)"
+  fi
 }
 
 start_panel() {
