@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -159,10 +160,30 @@ func ensureLogPaths(cfg map[string]any, configDir string) {
 		cfg["log"] = logObj
 	}
 	logObj["access"] = filepath.Join(configDir, "access.log")
+	// Write errors BOTH to file and keep visibility: xray only supports one sink.
+	// Prefer error.log for persistence; Start() also tails it into panellog/process failures.
 	logObj["error"] = filepath.Join(configDir, "error.log")
 	if _, ok := logObj["loglevel"]; !ok {
 		logObj["loglevel"] = "warning"
 	}
+}
+
+// TestConfig runs `xray run -test -c config.json` and returns combined output on failure.
+func (m *Manager) TestConfig() error {
+	if _, err := os.Stat(m.Bin); err != nil {
+		return fmt.Errorf("xray binary missing (%s)", m.Bin)
+	}
+	cmd := exec.Command(m.Bin, "run", "-test", "-c", m.ConfigPath())
+	cmd.Dir = m.ConfigDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Errorf("xray config test failed:\n%s", msg)
+	}
+	return nil
 }
 
 func mergeRouting(raw any, bridgeRules []map[string]any, dbRules []model.RoutingRule) map[string]any {
@@ -422,35 +443,56 @@ func (m *Manager) Start() error {
 	if _, err := os.Stat(m.Bin); err != nil {
 		return fmt.Errorf("xray binary missing (%s): place xray in bin dir or set WE1B_XRAY_BIN", m.Bin)
 	}
+	if err := m.TestConfig(); err != nil {
+		panellog.Append("%v", err)
+		return err
+	}
 	logW, err := m.openProcessLog()
 	if err != nil {
 		return fmt.Errorf("open process.log: %w", err)
 	}
+	// Stop previous instance fully before binding ports again.
+	if m.proc != nil {
+		_ = m.proc.Stop()
+		m.proc = nil
+	}
 	m.proc = supervisor.New("xray", m.Bin, "run", "-c", m.ConfigPath())
 	m.proc.SetLog(logW)
 	m.proc.OnExit = func(err error) {
+		tail := m.tailLogFile(m.ErrorLogPath(), 30)
 		if err != nil {
-			panellog.Append("xray exited: %v — see Logs → process / error", err)
+			if tail != "" {
+				panellog.Append("xray exited: %v\n--- error.log ---\n%s", err, tail)
+			} else {
+				panellog.Append("xray exited: %v — see Logs → process / error", err)
+			}
 		} else {
 			panellog.Append("xray exited cleanly")
 		}
 	}
-	if err := m.proc.StartAndWaitHealthy(900 * time.Millisecond); err != nil {
-		tail := m.tailProcessLog(40)
+	if err := m.proc.StartAndWaitHealthy(1500 * time.Millisecond); err != nil {
+		procTail := m.tailLogFile(m.ProcessLogPath(), 40)
+		errTail := m.tailLogFile(m.ErrorLogPath(), 40)
 		_ = m.proc.Stop()
-		if tail != "" {
-			panellog.Append("xray start failed:\n%s", tail)
-			return fmt.Errorf("%w\n--- process.log ---\n%s", err, tail)
+		var b strings.Builder
+		b.WriteString(err.Error())
+		if errTail != "" {
+			b.WriteString("\n--- error.log ---\n")
+			b.WriteString(errTail)
 		}
-		panellog.Append("xray start failed: %v", err)
-		return err
+		if procTail != "" {
+			b.WriteString("\n--- process.log ---\n")
+			b.WriteString(procTail)
+		}
+		msg := b.String()
+		panellog.Append("xray start failed:\n%s", msg)
+		return fmt.Errorf("%s", msg)
 	}
 	panellog.Append("xray started")
 	return nil
 }
 
-func (m *Manager) tailProcessLog(maxLines int) string {
-	path := filepath.Join(m.ConfigDir, "process.log")
+func (m *Manager) tailLogFile(path string, maxLines int) string {
 	b, err := os.ReadFile(path)
 	if err != nil || len(b) == 0 {
 		return ""
@@ -460,6 +502,10 @@ func (m *Manager) tailProcessLog(maxLines int) string {
 		lines = lines[len(lines)-maxLines:]
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func (m *Manager) tailProcessLog(maxLines int) string {
+	return m.tailLogFile(m.ProcessLogPath(), maxLines)
 }
 
 func (m *Manager) Stop() error {

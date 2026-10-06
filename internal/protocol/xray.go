@@ -74,12 +74,14 @@ func (a *xrayProxy) ToXrayInbound(in *model.Inbound, clients []model.Client) (ma
 
 	obj := map[string]any{
 		"tag":            in.Tag,
-		"listen":         in.Listen,
 		"port":           in.Port,
 		"protocol":       protoName,
 		"settings":       settings,
 		"streamSettings": stream,
 		"sniffing":       sniff,
+	}
+	if in.Listen != "" {
+		obj["listen"] = in.Listen
 	}
 	if a.proto == model.ProtoTUN {
 		delete(obj, "port")
@@ -97,9 +99,6 @@ func buildVLESSClients(clients []model.Client) []map[string]any {
 		m := map[string]any{"id": c.UUID, "email": c.Email}
 		if c.Flow != "" {
 			m["flow"] = c.Flow
-		}
-		if c.LimitIP > 0 {
-			m["limitIp"] = c.LimitIP
 		}
 		out = append(out, m)
 	}

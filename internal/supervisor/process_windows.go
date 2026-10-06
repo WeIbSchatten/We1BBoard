@@ -1,10 +1,10 @@
 package supervisor
 
-func (p *Process) stopOS() error {
-	if p.cmd == nil || p.cmd.Process == nil {
+import "os/exec"
+
+func (p *Process) signalStop(cmd *exec.Cmd) error {
+	if cmd == nil || cmd.Process == nil {
 		return nil
 	}
-	_ = p.cmd.Process.Kill()
-	_, _ = p.cmd.Process.Wait()
-	return nil
+	return cmd.Process.Kill()
 }

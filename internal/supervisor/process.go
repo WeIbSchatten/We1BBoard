@@ -27,6 +27,7 @@ type Process struct {
 	started time.Time
 	logW    io.Writer
 	lastErr error
+	done    chan struct{} // closed once Wait() finishes; never call Process.Wait twice
 }
 
 func New(name, bin string, args ...string) *Process {
@@ -54,6 +55,14 @@ func (p *Process) Start() error {
 	if p.running {
 		return nil
 	}
+	// Refuse to start while a previous Wait() is still finishing.
+	if p.done != nil {
+		select {
+		case <-p.done:
+		default:
+			return fmt.Errorf("%s previous process still stopping — retry", p.Name)
+		}
+	}
 	if _, err := os.Stat(p.Bin); err != nil {
 		return fmt.Errorf("%s binary not found at %s: %w", p.Name, p.Bin, err)
 	}
@@ -73,6 +82,8 @@ func (p *Process) Start() error {
 	p.running = true
 	p.started = time.Now()
 	p.lastErr = nil
+	done := make(chan struct{})
+	p.done = done
 	onExit := p.OnExit
 	go func() {
 		err := cmd.Wait()
@@ -80,6 +91,7 @@ func (p *Process) Start() error {
 		p.running = false
 		p.lastErr = err
 		p.mu.Unlock()
+		close(done)
 		if err != nil {
 			log.Printf("[%s] exited: %v", p.Name, err)
 		} else {
@@ -94,13 +106,12 @@ func (p *Process) Start() error {
 }
 
 // StartAndWaitHealthy starts the process and waits up to wait for it to stay alive.
-// If it exits during the wait, returns an error (with last wait error when available).
 func (p *Process) StartAndWaitHealthy(wait time.Duration) error {
 	if err := p.Start(); err != nil {
 		return err
 	}
 	if wait <= 0 {
-		wait = 800 * time.Millisecond
+		wait = 1500 * time.Millisecond
 	}
 	deadline := time.Now().Add(wait)
 	for time.Now().Before(deadline) {
@@ -109,7 +120,7 @@ func (p *Process) StartAndWaitHealthy(wait time.Duration) error {
 			if err != nil {
 				return fmt.Errorf("%s exited immediately: %w", p.Name, err)
 			}
-			return fmt.Errorf("%s exited immediately (check process.log / config)", p.Name)
+			return fmt.Errorf("%s exited immediately (check process.log / error.log)", p.Name)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
@@ -118,33 +129,65 @@ func (p *Process) StartAndWaitHealthy(wait time.Duration) error {
 		if err != nil {
 			return fmt.Errorf("%s exited immediately: %w", p.Name, err)
 		}
-		return fmt.Errorf("%s exited immediately (check process.log / config)", p.Name)
+		return fmt.Errorf("%s exited immediately (check process.log / error.log)", p.Name)
 	}
 	return nil
 }
 
 func (p *Process) Stop() error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if !p.running || p.cmd == nil || p.cmd.Process == nil {
+	cmd := p.cmd
+	done := p.done
+	running := p.running
+	p.mu.Unlock()
+
+	if cmd == nil || cmd.Process == nil {
+		p.mu.Lock()
 		p.running = false
+		p.mu.Unlock()
 		return nil
 	}
-	_ = p.stopOS()
+	if !running {
+		// Already exiting — still wait for Wait() so the port is freed.
+		if done != nil {
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+			}
+		}
+		return nil
+	}
+
+	_ = p.signalStop(cmd)
+
+	if done != nil {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			_ = cmd.Process.Kill()
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+			}
+		}
+	}
+
+	p.mu.Lock()
 	p.running = false
+	p.mu.Unlock()
+	// Brief grace so the kernel releases listen sockets before a restart.
+	time.Sleep(300 * time.Millisecond)
 	return nil
 }
 
 func (p *Process) Restart() error {
 	_ = p.Stop()
-	time.Sleep(200 * time.Millisecond)
 	return p.Start()
 }
 
 // RestartAndWaitHealthy restarts and verifies the process stays up.
 func (p *Process) RestartAndWaitHealthy(wait time.Duration) error {
 	_ = p.Stop()
-	time.Sleep(200 * time.Millisecond)
 	return p.StartAndWaitHealthy(wait)
 }
 
