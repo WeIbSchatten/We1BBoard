@@ -64,7 +64,7 @@ func ValidSubID(id string) bool {
 func (s *Server) Mount(r gin.IRouter, basePath string) {
 	basePath = strings.TrimSuffix(NormalizePath(basePath), "/")
 	g := r.Group(basePath)
-	g.Use(subSecurityHeaders(), subRateLimit(), requireSubEnabled())
+	g.Use(subSecurityHeaders(), subRateLimit(), requireSubEnabled(), enforceHWID())
 	g.GET("/:subId", s.handleAuto)
 	g.GET("/:subId/json", s.handleJSON)
 	g.GET("/:subId/clash", s.handleClash)
@@ -260,7 +260,17 @@ func (s *Server) writeUserinfo(c *gin.Context, entries []subEntry) {
 		title = "We1BBoard"
 	}
 	c.Header("Profile-Title", "base64:"+base64.StdEncoding.EncodeToString([]byte(title)))
-	c.Header("Content-Disposition", `attachment; filename="we1bboard"`)
+
+	happ := strings.Contains(c.GetHeader("User-Agent"), "Happ") || c.Query("happ") == "1"
+	if happ {
+		if support := strings.TrimSpace(database.GetSetting("subSupportUrl")); support != "" {
+			c.Header("Support-Url", support)
+			c.Header("support-url", support)
+		}
+		c.Header("Content-Disposition", `attachment; filename="happ.txt"`)
+	} else {
+		c.Header("Content-Disposition", `attachment; filename="we1bboard"`)
+	}
 }
 
 func detectFormat(ua, formatQ string) string {
@@ -417,20 +427,23 @@ func (s *Server) respondBase64(c *gin.Context, entries []subEntry) {
 }
 
 func (s *Server) respondJSON(c *gin.Context, entries []subEntry) {
-	type item struct {
-		Link     string `json:"link"`
-		Protocol string `json:"protocol"`
-		Email    string `json:"email"`
-		Remark   string `json:"remark"`
-	}
-	out := make([]item, 0, len(entries))
+	out := make([]map[string]any, 0, len(entries))
+	names := make([]string, 0, len(entries))
 	for _, e := range entries {
-		out = append(out, item{
-			Link: e.Link, Protocol: string(e.Inbound.Protocol),
-			Email: e.Client.Email, Remark: e.Inbound.Remark,
-		})
+		ob := jsonOutbound(&e.Inbound, e.Client, s.host(), e.Name, e.Link)
+		if ob == nil {
+			continue
+		}
+		out = append(out, ob)
+		if tag, _ := ob["tag"].(string); tag != "" {
+			names = append(names, tag)
+		}
 	}
-	c.JSON(http.StatusOK, gin.H{"clients": out})
+	// Append proxy-group style objects when sub balancers match.
+	for _, g := range subBalancerGroups(entries, names) {
+		out = append(out, g)
+	}
+	c.JSON(http.StatusOK, out)
 }
 
 func (s *Server) respondClash(c *gin.Context, entries []subEntry) {
@@ -444,12 +457,16 @@ func (s *Server) respondClash(c *gin.Context, entries []subEntry) {
 		proxies = append(proxies, proxy)
 		names = append(names, e.Name)
 	}
+	groups := []map[string]any{
+		{"name": "We1BBoard", "type": "select", "proxies": names},
+	}
+	for _, g := range clashBalancerGroups(entries, names) {
+		groups = append(groups, g)
+	}
 	doc := map[string]any{
-		"proxies": proxies,
-		"proxy-groups": []map[string]any{
-			{"name": "We1BBoard", "type": "select", "proxies": names},
-		},
-		"rules": []string{"MATCH,We1BBoard"},
+		"proxies":      proxies,
+		"proxy-groups": groups,
+		"rules":        []string{"MATCH,We1BBoard"},
 	}
 	b, _ := yaml.Marshal(doc)
 	c.Data(http.StatusOK, "text/yaml; charset=utf-8", b)
@@ -476,48 +493,33 @@ func (s *Server) respondSingBox(c *gin.Context, entries []subEntry) {
 }
 
 func clashProxy(in *model.Inbound, cl model.Client, host, name string) map[string]any {
+	if in.Protocol == "extra" {
+		return nil
+	}
 	stream := protocol.ParseStream(in.StreamSettings)
 	network, _ := stream["network"].(string)
+	if network == "" {
+		network = "tcp"
+	}
 	securityMode, _ := stream["security"].(string)
+	var p map[string]any
 	switch in.Protocol {
 	case model.ProtoVLESS:
-		p := map[string]any{
+		p = map[string]any{
 			"name": name, "type": "vless", "server": host, "port": in.Port,
 			"uuid": cl.UUID, "network": network, "udp": true,
 		}
 		if cl.Flow != "" {
 			p["flow"] = cl.Flow
 		}
-		if securityMode == "reality" || securityMode == "tls" {
-			p["tls"] = true
-		}
-		if securityMode == "reality" {
-			opts := map[string]any{}
-			if rs, ok := stream["realitySettings"].(map[string]any); ok {
-				if pbk, ok := rs["publicKey"].(string); ok {
-					opts["public-key"] = pbk
-				}
-				if sid, ok := rs["shortIds"].([]any); ok && len(sid) > 0 {
-					opts["short-id"] = fmt.Sprint(sid[0])
-				}
-				if sni, ok := rs["serverNames"].([]any); ok && len(sni) > 0 {
-					p["servername"] = fmt.Sprint(sni[0])
-				}
-				if fp, ok := rs["fingerprint"].(string); ok {
-					p["client-fingerprint"] = fp
-				}
-			}
-			p["reality-opts"] = opts
-		}
-		return p
 	case model.ProtoTrojan:
 		pw := cl.Password
 		if pw == "" {
 			pw = cl.UUID
 		}
-		return map[string]any{
+		p = map[string]any{
 			"name": name, "type": "trojan", "server": host, "port": in.Port,
-			"password": pw, "udp": true,
+			"password": pw, "udp": true, "network": network,
 		}
 	case model.ProtoShadowsocks:
 		settings := protocol.ParseSettings(in.Settings)
@@ -526,12 +528,13 @@ func clashProxy(in *model.Inbound, cl model.Client, host, name string) map[strin
 		if pw == "" {
 			pw = cl.UUID
 		}
-		return map[string]any{
+		p = map[string]any{
 			"name": name, "type": "ss", "server": host, "port": in.Port,
 			"cipher": method, "password": pw, "udp": true,
 		}
+		return p
 	case model.ProtoVMess:
-		return map[string]any{
+		p = map[string]any{
 			"name": name, "type": "vmess", "server": host, "port": in.Port,
 			"uuid": cl.UUID, "alterId": 0, "cipher": "auto", "udp": true,
 			"network": network,
@@ -539,6 +542,233 @@ func clashProxy(in *model.Inbound, cl model.Client, host, name string) map[strin
 	default:
 		return nil
 	}
+	applyClashStream(p, stream, network, securityMode)
+	return p
+}
+
+func applyClashStream(p map[string]any, stream map[string]any, network, securityMode string) {
+	if securityMode == "reality" || securityMode == "tls" {
+		p["tls"] = true
+	}
+	if securityMode == "reality" {
+		opts := map[string]any{}
+		if rs, ok := stream["realitySettings"].(map[string]any); ok {
+			if pbk, ok := rs["publicKey"].(string); ok {
+				opts["public-key"] = pbk
+			}
+			if sid, ok := rs["shortIds"].([]any); ok && len(sid) > 0 {
+				opts["short-id"] = fmt.Sprint(sid[0])
+			}
+			if sni, ok := rs["serverNames"].([]any); ok && len(sni) > 0 {
+				p["servername"] = fmt.Sprint(sni[0])
+			}
+			if fp, ok := rs["fingerprint"].(string); ok {
+				p["client-fingerprint"] = fp
+			}
+		}
+		p["reality-opts"] = opts
+	} else if securityMode == "tls" {
+		if ts, ok := stream["tlsSettings"].(map[string]any); ok {
+			if sni, ok := ts["serverName"].(string); ok && sni != "" {
+				p["servername"] = sni
+			}
+			if fp, ok := ts["fingerprint"].(string); ok && fp != "" {
+				p["client-fingerprint"] = fp
+			}
+			if alpn, ok := ts["alpn"].([]any); ok && len(alpn) > 0 {
+				parts := make([]string, 0, len(alpn))
+				for _, a := range alpn {
+					parts = append(parts, fmt.Sprint(a))
+				}
+				p["alpn"] = parts
+			}
+			if ai, ok := ts["allowInsecure"].(bool); ok && ai {
+				p["skip-cert-verify"] = true
+			}
+		}
+	}
+	switch network {
+	case "ws":
+		opts := map[string]any{}
+		if ws, ok := stream["wsSettings"].(map[string]any); ok {
+			if path, ok := ws["path"].(string); ok {
+				opts["path"] = path
+			}
+			if h, ok := ws["headers"].(map[string]any); ok {
+				if host, ok := h["Host"].(string); ok && host != "" {
+					opts["headers"] = map[string]any{"Host": host}
+				}
+			}
+		}
+		p["ws-opts"] = opts
+	case "grpc":
+		opts := map[string]any{}
+		if gs, ok := stream["grpcSettings"].(map[string]any); ok {
+			if sn, ok := gs["serviceName"].(string); ok {
+				opts["grpc-service-name"] = sn
+			}
+		}
+		p["grpc-opts"] = opts
+	case "h2", "http":
+		opts := map[string]any{}
+		if hs, ok := stream["httpSettings"].(map[string]any); ok {
+			if path, ok := hs["path"].(string); ok {
+				opts["path"] = []string{path}
+			}
+			if host, ok := hs["host"].([]any); ok {
+				parts := make([]string, 0, len(host))
+				for _, h := range host {
+					parts = append(parts, fmt.Sprint(h))
+				}
+				opts["host"] = parts
+			}
+		}
+		p["h2-opts"] = opts
+	}
+}
+
+// jsonOutbound builds an outbound-like object from inbound+client (DB), not by parsing the URI.
+func jsonOutbound(in *model.Inbound, cl model.Client, host, name, link string) map[string]any {
+	if in.Protocol == "extra" {
+		return map[string]any{
+			"protocol": "extra",
+			"tag":      name,
+			"link":     link,
+			"remark":   in.Remark,
+		}
+	}
+	stream := protocol.ParseStream(in.StreamSettings)
+	ob := map[string]any{
+		"protocol":       string(in.Protocol),
+		"tag":            name,
+		"address":        host,
+		"port":           in.Port,
+		"email":          cl.Email,
+		"remark":         in.Remark,
+		"streamSettings": stream,
+		"link":           link,
+	}
+	switch in.Protocol {
+	case model.ProtoVLESS, model.ProtoVMess:
+		ob["id"] = cl.UUID
+		if cl.Flow != "" {
+			ob["flow"] = cl.Flow
+		}
+	case model.ProtoTrojan:
+		pw := cl.Password
+		if pw == "" {
+			pw = cl.UUID
+		}
+		ob["password"] = pw
+		ob["id"] = cl.UUID
+	case model.ProtoShadowsocks:
+		settings := protocol.ParseSettings(in.Settings)
+		method, _ := settings["method"].(string)
+		pw := cl.Password
+		if pw == "" {
+			pw = cl.UUID
+		}
+		ob["method"] = method
+		ob["password"] = pw
+		ob["id"] = cl.UUID
+	default:
+		ob["id"] = cl.UUID
+		if cl.Password != "" {
+			ob["password"] = cl.Password
+		}
+		if cl.Flow != "" {
+			ob["flow"] = cl.Flow
+		}
+	}
+	return ob
+}
+
+func loadEnabledSubBalancers() []model.SubBalancer {
+	var rows []model.SubBalancer
+	_ = database.DB.Where("enable = ?", true).Order("id asc").Find(&rows)
+	return rows
+}
+
+func subBalancerMatches(b model.SubBalancer, entries []subEntry) bool {
+	sel := strings.TrimSpace(b.Selector)
+	if sel == "" {
+		return true // empty selector = all proxies in this sub
+	}
+	parts := strings.Split(sel, ",")
+	emails := map[string]bool{}
+	tags := map[string]bool{}
+	for _, e := range entries {
+		if e.Client.Email != "" {
+			emails[strings.ToLower(e.Client.Email)] = true
+		}
+		if e.Inbound.Tag != "" {
+			tags[e.Inbound.Tag] = true
+		}
+	}
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if emails[strings.ToLower(p)] || tags[p] {
+			return true
+		}
+	}
+	return false
+}
+
+func clashStrategyType(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "fallback":
+		return "fallback"
+	case "round-robin", "roundrobin":
+		return "load-balance"
+	default:
+		return "url-test"
+	}
+}
+
+func clashBalancerGroups(entries []subEntry, names []string) []map[string]any {
+	if len(names) == 0 {
+		return nil
+	}
+	out := []map[string]any{}
+	for _, b := range loadEnabledSubBalancers() {
+		if !subBalancerMatches(b, entries) {
+			continue
+		}
+		g := map[string]any{
+			"name":    b.Name,
+			"type":    clashStrategyType(b.Strategy),
+			"proxies": names,
+		}
+		if g["type"] == "url-test" {
+			g["url"] = "http://www.gstatic.com/generate_204"
+			g["interval"] = 300
+		}
+		out = append(out, g)
+	}
+	return out
+}
+
+func subBalancerGroups(entries []subEntry, names []string) []map[string]any {
+	if len(names) == 0 {
+		return nil
+	}
+	out := []map[string]any{}
+	for _, b := range loadEnabledSubBalancers() {
+		if !subBalancerMatches(b, entries) {
+			continue
+		}
+		out = append(out, map[string]any{
+			"protocol": "balancer",
+			"tag":      b.Name,
+			"strategy": b.Strategy,
+			"selector": names,
+			"remark":   b.Remark,
+		})
+	}
+	return out
 }
 
 func singBoxOutbound(in *model.Inbound, cl model.Client, host, name string) map[string]any {
@@ -749,12 +979,53 @@ func ValidateSettings(key, value string) error {
 		default:
 			return fmt.Errorf("invalid subEnable")
 		}
-	case "subJsonEnable", "subClashEnable", "tgBotEnable", "tgNotifyLogin", "tgNotifyTraffic", "twoFactorEnable":
+	case "subJsonEnable", "subClashEnable", "tgBotEnable", "tgNotifyLogin", "tgNotifyTraffic", "twoFactorEnable",
+		"emailEnable", "emailNotifyLogin", "discordEnable", "discordNotifyLogin":
 		v := strings.ToLower(strings.TrimSpace(value))
 		switch v {
 		case "true", "false", "1", "0", "yes", "no", "on", "off", "":
 		default:
 			return fmt.Errorf("invalid %s", key)
+		}
+	case "smtpPort":
+		v := strings.TrimSpace(value)
+		if v == "" {
+			return nil
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 65535 {
+			return fmt.Errorf("invalid smtpPort")
+		}
+	case "smtpHost":
+		v := strings.TrimSpace(value)
+		if v == "" {
+			return nil
+		}
+		if len(v) > 255 || strings.ContainsAny(v, " \t\r\n/:@") {
+			return fmt.Errorf("invalid smtpHost")
+		}
+	case "smtpFrom", "smtpUser":
+		if len(value) > 256 {
+			return fmt.Errorf("%s too long", key)
+		}
+	case "smtpPass":
+		if value == "***" || strings.Contains(value, "…") {
+			return nil
+		}
+		if len(value) > 256 {
+			return fmt.Errorf("smtpPass too long")
+		}
+	case "discordWebhook":
+		v := strings.TrimSpace(value)
+		if v == "" || v == "***" || strings.Contains(v, "…") {
+			return nil
+		}
+		if len(v) > 512 {
+			return fmt.Errorf("discordWebhook too long")
+		}
+		if !strings.HasPrefix(v, "https://discord.com/api/webhooks/") &&
+			!strings.HasPrefix(v, "https://discordapp.com/api/webhooks/") {
+			return fmt.Errorf("discordWebhook must be https://discord.com/api/webhooks/…")
 		}
 	case "tgBotToken":
 		v := strings.TrimSpace(value)

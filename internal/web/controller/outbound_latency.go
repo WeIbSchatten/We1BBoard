@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/we1bboard/we1bboard/internal/database"
 	"github.com/we1bboard/we1bboard/internal/database/model"
+	"github.com/we1bboard/we1bboard/internal/web/observatory"
 )
 
 // OutboundTestResult is the TCP dial latency for one outbound.
@@ -44,13 +45,17 @@ func (a *API) TestAllOutbounds(c *gin.Context) {
 		return
 	}
 	results := make([]OutboundTestResult, 0, len(rows))
+	obsItems := make([]observatory.Item, 0, len(rows))
 	for i := range rows {
 		o := &rows[i]
 		if !isProxyOutbound(o.Protocol, o.Tag) {
 			continue
 		}
-		results = append(results, dialOutbound(o))
+		r := dialOutbound(o)
+		results = append(results, r)
+		obsItems = append(obsItems, observatory.Item{Tag: r.Tag, Delay: r.LatencyMs, Alive: r.OK})
 	}
+	observatory.Store(obsItems)
 	ok(c, gin.H{"results": results})
 }
 

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { api, type Client, type GroupSummary, type Inbound } from '../api'
+import { api, type Client, type GroupSummary, type Inbound, type OnlineClients } from '../api'
 import { useApp } from '../AppContext'
 import { ClientBulkAddModal } from '../components/ClientBulkAddModal'
 import { ClientBulkAdjustModal } from '../components/ClientBulkAdjustModal'
 import { ClientBulkAttachModal } from '../components/ClientBulkAttachModal'
+import { ClientBulkDetachModal } from '../components/ClientBulkDetachModal'
 import { ClientFormModal } from '../components/ClientFormModal'
 import { ClientInfoModal } from '../components/ClientInfoModal'
 import { inboundSupportsClients } from '../lib/inboundForm'
@@ -43,7 +44,9 @@ export function ClientsPage() {
   const [infoTab, setInfoTab] = useState<'info' | 'links' | 'sub' | 'qr'>('info')
   const [bulkOpen, setBulkOpen] = useState(false)
   const [attachOpen, setAttachOpen] = useState(false)
+  const [detachOpen, setDetachOpen] = useState(false)
   const [adjustOpen, setAdjustOpen] = useState(false)
+  const [onlineMap, setOnlineMap] = useState<Record<string, number>>({})
 
   async function load() {
     const [ib, g] = await Promise.all([
@@ -54,7 +57,19 @@ export function ClientsPage() {
     setGroups(g || [])
   }
 
+  async function loadOnlines() {
+    try {
+      const data = await api<OnlineClients>('/clients/onlines')
+      setOnlineMap(data?.map || {})
+    } catch { /* ignore */ }
+  }
+
   useEffect(() => { load().catch(console.error) }, [])
+  useEffect(() => {
+    void loadOnlines()
+    const t = setInterval(() => { void loadOnlines() }, 15000)
+    return () => clearInterval(t)
+  }, [])
 
   const clientInbounds = useMemo(
     () => inbounds.filter((i) => inboundSupportsClients(i.protocol)),
@@ -160,6 +175,7 @@ export function ClientsPage() {
         <div className="row-actions">
           <button className="btn secondary" onClick={() => { void bulkAddToGroup() }} disabled={rows.length === 0}>{tr('addToGroup')}</button>
           <button className="btn secondary" onClick={() => setAttachOpen(true)} disabled={rows.length === 0}>{tr('bulkAttach')}</button>
+          <button className="btn secondary" onClick={() => setDetachOpen(true)} disabled={rows.length === 0}>{tr('bulkDetach')}</button>
           <button className="btn secondary" onClick={() => setAdjustOpen(true)} disabled={rows.length === 0}>{tr('bulkAdjust')}</button>
           <button className="btn secondary" onClick={() => setBulkOpen(true)} disabled={clientInbounds.length === 0}>{tr('bulkAdd')}</button>
           <button
@@ -232,7 +248,10 @@ export function ClientsPage() {
                       onChange={(e) => setSelected((prev) => e.target.checked ? [...prev, c.id] : prev.filter((x) => x !== c.id))}
                     />
                   </td>
-                  <td>{c.email}</td>
+                  <td>
+                    {c.email}{' '}
+                    {onlineMap[c.email] ? <span className="badge on">{tr('online')}</span> : null}
+                  </td>
                   <td>{c.group || '—'}</td>
                   <td>
                     <span className="badge">{c.inboundProtocol}</span>{' '}
@@ -259,6 +278,7 @@ export function ClientsPage() {
         open={!!infoClient}
         client={infoClient}
         inbounds={inbounds}
+        online={!!(infoClient && onlineMap[infoClient.email])}
         initialTab={infoTab}
         onClose={() => setInfoClient(null)}
         onResetTraffic={() => { void load() }}
@@ -285,6 +305,13 @@ export function ClientsPage() {
         clients={rows}
         inbounds={clientInbounds}
         onClose={() => setAttachOpen(false)}
+        onSaved={() => { void load() }}
+      />
+      <ClientBulkDetachModal
+        open={detachOpen}
+        clients={rows}
+        inbounds={clientInbounds}
+        onClose={() => setDetachOpen(false)}
         onSaved={() => { void load() }}
       />
       <ClientBulkAdjustModal

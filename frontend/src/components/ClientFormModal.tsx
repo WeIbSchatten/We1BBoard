@@ -44,6 +44,7 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, groupNa
   const [enable, setEnable] = useState(true)
   const [totalGB, setTotalGB] = useState(0)
   const [limitIp, setLimitIp] = useState(0)
+  const [limitHwid, setLimitHwid] = useState(0)
   const [expiryDays, setExpiryDays] = useState(0)
   const [trafficReset, setTrafficReset] = useState('never')
   const [extraLinks, setExtraLinks] = useState('')
@@ -76,6 +77,7 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, groupNa
       setEnable(client.enable)
       setTotalGB(client.totalGB || 0)
       setLimitIp(client.limitIp || 0)
+      setLimitHwid(client.limitHwid || 0)
       setComment(client.comment || '')
       setTgId(client.tgId || 0)
       setTrafficReset(client.trafficReset || 'never')
@@ -94,6 +96,7 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, groupNa
       setEnable(true)
       setTotalGB(0)
       setLimitIp(0)
+      setLimitHwid(0)
       setExpiryDays(0)
       setComment('')
       setTgId(0)
@@ -147,6 +150,7 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, groupNa
         enable,
         totalGB,
         limitIp,
+        limitHwid,
         trafficReset,
         extraLinks,
         comment,
@@ -219,6 +223,10 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, groupNa
             <div className="field">
               <label className="label">Limit IP (0 = ∞)</label>
               <input className="input" type="number" min={0} value={limitIp} onChange={(e) => setLimitIp(Number(e.target.value))} />
+            </div>
+            <div className="field">
+              <label className="label">Limit HWID (0 = ∞)</label>
+              <input className="input" type="number" min={0} value={limitHwid} onChange={(e) => setLimitHwid(Number(e.target.value))} />
             </div>
             <div className="field">
               <label className="label">Expiry days (0 = never)</label>

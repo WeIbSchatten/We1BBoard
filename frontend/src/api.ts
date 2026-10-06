@@ -46,6 +46,7 @@ export type Client = {
   subId: string
   group?: string
   limitIp?: number
+  limitHwid?: number
   totalGB: number
   expiryTime: number
   trafficReset?: string
@@ -54,6 +55,23 @@ export type Client = {
   down: number
   comment: string
   tgId?: number
+}
+
+export type OnlineClients = {
+  emails: string[]
+  map: Record<string, number>
+}
+
+export type ClientIPRow = {
+  ip: string
+  lastSeen: number
+}
+
+export type ClientHWIDRow = {
+  id: number
+  email: string
+  hwid: string
+  createdAt: string
 }
 
 export type GroupSummary = {

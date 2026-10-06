@@ -67,6 +67,7 @@ type Client struct {
 	SubID      string    `gorm:"size:64;index" json:"subId"`
 	Group      string    `gorm:"column:group_name;size:128;index" json:"group"`
 	LimitIP    int       `json:"limitIp"`
+	LimitHWID  int       `json:"limitHwid"`
 	TotalGB    int64     `json:"totalGB"`
 	ExpiryTime int64     `json:"expiryTime"`
 	TrafficReset string  `gorm:"size:32;default:never" json:"trafficReset"` // never|daily|weekly|monthly
@@ -199,6 +200,22 @@ type RoutingRule struct {
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
+// ClientIP tracks a source IP recently seen for a client (from xray access.log).
+type ClientIP struct {
+	ID       uint   `gorm:"primaryKey" json:"id"`
+	Email    string `gorm:"index;size:255;uniqueIndex:idx_client_ip_email_ip,priority:1" json:"email"`
+	IP       string `gorm:"size:64;uniqueIndex:idx_client_ip_email_ip,priority:2" json:"ip"`
+	LastSeen int64  `json:"lastSeen"`
+}
+
+// ClientHWID stores a registered hardware/device id for a client email.
+type ClientHWID struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	Email     string    `gorm:"index;size:255" json:"email"`
+	HWID      string    `gorm:"size:128" json:"hwid"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 // OutboundSubscription is a remote share-link list that upserts Outbound rows on refresh.
 type OutboundSubscription struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
@@ -211,4 +228,16 @@ type OutboundSubscription struct {
 	LastError   string    `gorm:"size:512" json:"lastError"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+// SubBalancer defines Clash/JSON proxy-group strategies for subscription clients.
+type SubBalancer struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	Name      string    `gorm:"size:128;not null" json:"name"`
+	Strategy  string    `gorm:"size:32;default:url-test" json:"strategy"` // url-test|fallback|round-robin
+	Selector  string    `gorm:"type:text" json:"selector"`               // csv emails or inbound tags
+	Enable    bool      `gorm:"default:true" json:"enable"`
+	Remark    string    `gorm:"size:255" json:"remark"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }

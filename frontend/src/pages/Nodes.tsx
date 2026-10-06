@@ -1,11 +1,36 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, Fragment, useEffect, useState } from 'react'
 import { api, type Node } from '../api'
 import { useApp } from '../AppContext'
+
+type NodeHistory = { online: number[]; latency: number[] }
+
+function Sparkline({ values, color }: { values: number[]; color: string }) {
+  const w = 120
+  const h = 28
+  if (!values.length) {
+    return <svg width={w} height={h} aria-hidden><text x={4} y={18} fill="currentColor" fontSize={10}>—</text></svg>
+  }
+  const max = Math.max(...values, 1)
+  const min = Math.min(...values, 0)
+  const span = Math.max(max - min, 1)
+  const pts = values.map((v, i) => {
+    const x = values.length === 1 ? w / 2 : (i / (values.length - 1)) * (w - 2) + 1
+    const y = h - 2 - ((v - min) / span) * (h - 4)
+    return `${x},${y}`
+  }).join(' ')
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden style={{ display: 'block' }}>
+      <polyline fill="none" stroke={color} strokeWidth="1.5" points={pts} />
+    </svg>
+  )
+}
 
 export function NodesPage() {
   const { tr } = useApp()
   const [rows, setRows] = useState<Node[]>([])
   const [open, setOpen] = useState(false)
+  const [expanded, setExpanded] = useState<number | null>(null)
+  const [hist, setHist] = useState<Record<number, NodeHistory>>({})
   const [form, setForm] = useState({ name: '', url: '', token: '', tlsMode: 'verify', region: 'eu', enable: true })
 
   async function load() { setRows(await api<Node[]>('/nodes')) }
@@ -20,11 +45,28 @@ export function NodesPage() {
 
   async function ping() {
     setRows(await api<Node[]>('/nodes/ping', { method: 'POST' }))
+    if (expanded != null) await loadHistory(expanded)
   }
 
   async function remove(id: number) {
     await api(`/nodes/${id}`, { method: 'DELETE' })
     await load()
+  }
+
+  async function loadHistory(id: number) {
+    try {
+      const h = await api<NodeHistory>(`/nodes/${id}/history`)
+      setHist((prev) => ({ ...prev, [id]: h }))
+    } catch { /* ignore */ }
+  }
+
+  async function toggleExpand(id: number) {
+    if (expanded === id) {
+      setExpanded(null)
+      return
+    }
+    setExpanded(id)
+    await loadHistory(id)
   }
 
   return (
@@ -47,13 +89,33 @@ export function NodesPage() {
           <tbody>
             {rows.length === 0 && <tr><td colSpan={5}>{tr('empty')}</td></tr>}
             {rows.map((n) => (
-              <tr key={n.id}>
-                <td>{n.name}</td>
-                <td>{n.url}</td>
-                <td>{n.region}</td>
-                <td><span className={`badge ${n.online ? 'on' : 'off'}`}>{n.online ? 'online' : 'offline'}</span></td>
-                <td><button className="btn danger" onClick={() => remove(n.id)}>{tr('delete')}</button></td>
-              </tr>
+              <Fragment key={n.id}>
+                <tr style={{ cursor: 'pointer' }} onClick={() => { void toggleExpand(n.id) }}>
+                  <td>{n.name}</td>
+                  <td>{n.url}</td>
+                  <td>{n.region}</td>
+                  <td><span className={`badge ${n.online ? 'on' : 'off'}`}>{n.online ? 'online' : 'offline'}</span></td>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <button className="btn danger" onClick={() => remove(n.id)}>{tr('delete')}</button>
+                  </td>
+                </tr>
+                {expanded === n.id && (
+                  <tr>
+                    <td colSpan={5}>
+                      <div style={{ display: 'flex', gap: 24, alignItems: 'center', padding: '4px 0' }}>
+                        <div>
+                          <div className="label" style={{ marginBottom: 4 }}>online</div>
+                          <Sparkline values={hist[n.id]?.online || []} color="var(--accent)" />
+                        </div>
+                        <div>
+                          <div className="label" style={{ marginBottom: 4 }}>latency (ms)</div>
+                          <Sparkline values={hist[n.id]?.latency || []} color="var(--warn, #f59e0b)" />
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             ))}
           </tbody>
         </table>

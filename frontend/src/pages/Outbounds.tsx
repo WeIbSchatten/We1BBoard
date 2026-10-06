@@ -91,6 +91,42 @@ export function OutboundsPage() {
     }
   }
 
+  async function addVpnPlaceholder(kind: 'nord' | 'pia') {
+    setBusy(true)
+    setMsg('')
+    try {
+      const data = await api<{
+        outbound: Outbound
+        note: string
+      }>(`/xray/${kind}/template`, { method: 'POST' })
+      const ob = data.outbound
+      let tag = ob.tag || kind
+      const existing = new Set(rows.map((r) => r.tag))
+      if (existing.has(tag)) {
+        let i = 2
+        while (existing.has(`${tag}-${i}`)) i++
+        tag = `${tag}-${i}`
+      }
+      await api('/outbounds', {
+        method: 'POST',
+        body: JSON.stringify({
+          tag,
+          protocol: ob.protocol || 'wireguard',
+          enable: false,
+          remark: ob.remark || `${kind.toUpperCase()} placeholder`,
+          settings: ob.settings,
+          streamSettings: '',
+        }),
+      })
+      setMsg(data.note || `${kind.toUpperCase()} placeholder added (disabled)`)
+      await load()
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function saveSub(e: FormEvent) {
     e.preventDefault()
     setBusy(true)
@@ -199,6 +235,12 @@ export function OutboundsPage() {
           </button>
           <button className="btn secondary" type="button" disabled={busy} onClick={() => void addWarp()}>
             {tr('addWarp')}
+          </button>
+          <button className="btn secondary" type="button" disabled={busy} onClick={() => void addVpnPlaceholder('nord')}>
+            {tr('addNord')}
+          </button>
+          <button className="btn secondary" type="button" disabled={busy} onClick={() => void addVpnPlaceholder('pia')}>
+            {tr('addPIA')}
           </button>
           <button className="btn" type="button" onClick={() => setModal({ open: true, mode: 'add', outbound: null })}>
             {tr('create')}

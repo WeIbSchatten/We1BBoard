@@ -89,6 +89,7 @@ export function XrayPage() {
   const [obsProbeURL, setObsProbeURL] = useState('https://www.google.com/generate_204')
   const [obsInterval, setObsInterval] = useState('10s')
   const [obsSelector, setObsSelector] = useState('')
+  const [obsSnap, setObsSnap] = useState<{ updatedAt: number; items: { tag: string; delay: number; alive: boolean }[] } | null>(null)
 
   const [testForm, setTestForm] = useState({
     inboundTag: '', domain: '', ip: '', port: '', network: '', protocol: '', user: '',
@@ -106,6 +107,14 @@ export function XrayPage() {
     setTpl(t)
     setOutbounds(obs || [])
     applyTemplateToForms(t)
+  }, [])
+
+  const loadObservatory = useCallback(async () => {
+    try {
+      setObsSnap(await api<{ updatedAt: number; items: { tag: string; delay: number; alive: boolean }[] }>('/xray/observatory'))
+    } catch {
+      setObsSnap(null)
+    }
   }, [])
 
   const loadXrayVersion = useCallback(async () => {
@@ -142,6 +151,9 @@ export function XrayPage() {
   }
 
   useEffect(() => { load().catch(console.error) }, [load])
+  useEffect(() => {
+    if (tab === 'balancers') loadObservatory().catch(console.error)
+  }, [tab, loadObservatory])
   useEffect(() => {
     if (tab === 'basics') loadXrayVersion().catch(() => {})
   }, [tab, loadXrayVersion])
@@ -572,6 +584,35 @@ export function XrayPage() {
             <button className="btn" type="button" disabled={busy} onClick={() => void saveBalancersAndObs(balancers)}>
               {busy ? '…' : tr('save')}
             </button>
+          </div>
+
+          <div className="card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ marginTop: 0, marginBottom: 0 }}>Observatory lite (last probes)</h3>
+              <button className="btn secondary" type="button" onClick={() => { void loadObservatory() }}>{tr('refresh')}</button>
+            </div>
+            <p className="page-sub">
+              {obsSnap?.updatedAt
+                ? `updated ${new Date(obsSnap.updatedAt * 1000).toLocaleString()}`
+                : 'No samples yet — enable observatory in template or run Test all on Outbounds'}
+            </p>
+            <table className="table">
+              <thead>
+                <tr><th>Tag</th><th>Alive</th><th>Delay (ms)</th></tr>
+              </thead>
+              <tbody>
+                {(obsSnap?.items || []).length === 0 && (
+                  <tr><td colSpan={3}>{tr('empty')}</td></tr>
+                )}
+                {(obsSnap?.items || []).map((it) => (
+                  <tr key={it.tag}>
+                    <td><code style={{ fontFamily: 'var(--mono)' }}>{it.tag}</code></td>
+                    <td><span className={`badge ${it.alive ? 'on' : 'off'}`}>{it.alive ? 'alive' : 'down'}</span></td>
+                    <td>{it.alive ? Math.round(it.delay) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

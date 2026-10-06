@@ -16,6 +16,7 @@ import (
 	"github.com/we1bboard/we1bboard/internal/panellog"
 	"github.com/we1bboard/we1bboard/internal/security"
 	"github.com/we1bboard/we1bboard/internal/tgproxy"
+	"github.com/we1bboard/we1bboard/internal/web/nodehist"
 	"github.com/we1bboard/we1bboard/internal/xray"
 )
 
@@ -154,10 +155,17 @@ func (h *Hub) PingNodes() {
 	for i := range nodes {
 		n := &nodes[i]
 		r := &Remote{Node: n}
-		online := r.Heartbeat() == nil
+		start := time.Now()
+		err := r.Heartbeat()
+		latencyMs := float64(time.Since(start).Microseconds()) / 1000.0
+		online := err == nil
+		if !online {
+			latencyMs = 0
+		}
 		_ = database.DB.Model(n).Updates(map[string]any{
 			"online":    online,
 			"last_seen": time.Now().Unix(),
 		})
+		nodehist.Record(n.ID, online, latencyMs)
 	}
 }

@@ -101,9 +101,12 @@ func Init(cfg *config.Config) error {
 		&model.Setting{},
 		&model.Inbound{},
 		&model.Client{},
+		&model.ClientIP{},
+		&model.ClientHWID{},
 		&model.Host{},
 		&model.Outbound{},
 		&model.OutboundSubscription{},
+		&model.SubBalancer{},
 		&model.Node{},
 		&model.Bridge{},
 		&model.TgProxyProfile{},
@@ -226,6 +229,16 @@ func seed(db *gorm.DB) error {
 		"tgBotChatId":     "",
 		"tgNotifyLogin":   "false",
 		"tgNotifyTraffic": "false",
+		"emailEnable":        "false",
+		"smtpHost":           "",
+		"smtpPort":           "587",
+		"smtpUser":           "",
+		"smtpPass":           "",
+		"smtpFrom":           "",
+		"emailNotifyLogin":   "false",
+		"discordEnable":      "false",
+		"discordWebhook":     "",
+		"discordNotifyLogin": "false",
 		"trafficCron":            "@every 10s",
 		"routingDomainStrategy":  "AsIs",
 		"geodataGeositeURL": "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat",
@@ -296,6 +309,9 @@ func envDataDir() string {
 }
 
 func GetSetting(key string) string {
+	if DB == nil {
+		return ""
+	}
 	var s model.Setting
 	if err := DB.Where(&model.Setting{Key: key}).First(&s).Error; err != nil {
 		return ""
@@ -322,6 +338,8 @@ var SensitiveSettings = map[string]bool{
 	"nodeToken":       true,
 	"twoFactorSecret": true,
 	"tgBotToken":      true,
+	"smtpPass":        true,
+	"discordWebhook":  true,
 }
 
 func AllSettingsPublic() (map[string]string, error) {
@@ -372,4 +390,7 @@ var AllowedSettingKeys = map[string]bool{
 	"twoFactorEnable": true, "twoFactorSecret": true,
 	"tgBotEnable": true, "tgBotToken": true, "tgBotChatId": true,
 	"tgNotifyLogin": true, "tgNotifyTraffic": true,
+	"emailEnable": true, "smtpHost": true, "smtpPort": true, "smtpUser": true, "smtpPass": true, "smtpFrom": true,
+	"emailNotifyLogin": true,
+	"discordEnable": true, "discordWebhook": true, "discordNotifyLogin": true,
 }

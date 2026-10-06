@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from 'react'
-import { api, type Client, type Inbound } from '../api'
+import { api, type Client, type Inbound, type OnlineClients } from '../api'
 import { useApp } from '../AppContext'
 import { ClientFormModal } from '../components/ClientFormModal'
 import { ClientInfoModal } from '../components/ClientInfoModal'
@@ -34,9 +34,17 @@ export function InboundsPage() {
   const [infoClient, setInfoClient] = useState<Client | null>(null)
   const [infoTab, setInfoTab] = useState<'info' | 'links' | 'sub' | 'qr'>('info')
   const [pendingClientInbound, setPendingClientInbound] = useState<Inbound | null>(null)
+  const [onlineMap, setOnlineMap] = useState<Record<string, number>>({})
 
   async function load() {
     setRows(await api<Inbound[]>('/inbounds'))
+  }
+
+  async function loadOnlines() {
+    try {
+      const data = await api<OnlineClients>('/clients/onlines')
+      setOnlineMap(data?.map || {})
+    } catch { /* ignore */ }
   }
 
   async function loadRates() {
@@ -51,8 +59,10 @@ export function InboundsPage() {
   useEffect(() => {
     load().catch(console.error)
     loadRates().catch(() => {})
+    void loadOnlines()
     const t = setInterval(() => { void loadRates() }, 5000)
-    return () => clearInterval(t)
+    const t2 = setInterval(() => { void loadOnlines() }, 15000)
+    return () => { clearInterval(t); clearInterval(t2) }
   }, [])
 
   useEffect(() => {
@@ -213,7 +223,10 @@ export function InboundsPage() {
                             <tbody>
                               {clients.map((c) => (
                                 <tr key={c.id}>
-                                  <td>{c.email}</td>
+                                  <td>
+                                    {c.email}{' '}
+                                    {onlineMap[c.email] ? <span className="badge on">{tr('online')}</span> : null}
+                                  </td>
                                   <td><code style={{ fontFamily: 'var(--mono)', fontSize: '0.8rem' }}>{c.uuid?.slice(0, 8)}…</code></td>
                                   <td>{traffic(c)}</td>
                                   <td>{expiryLabel(c)}</td>
@@ -244,6 +257,7 @@ export function InboundsPage() {
         open={!!infoClient}
         client={infoClient}
         inbounds={rows}
+        online={!!(infoClient && onlineMap[infoClient.email])}
         initialTab={infoTab}
         onClose={() => setInfoClient(null)}
         onResetTraffic={() => { void load() }}

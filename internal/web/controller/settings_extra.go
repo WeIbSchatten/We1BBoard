@@ -10,6 +10,8 @@ import (
 	"github.com/pquerna/otp/totp"
 	"github.com/skip2/go-qrcode"
 	"github.com/we1bboard/we1bboard/internal/database"
+	"github.com/we1bboard/we1bboard/internal/discordnotify"
+	"github.com/we1bboard/we1bboard/internal/emailnotify"
 	"github.com/we1bboard/we1bboard/internal/tgnotify"
 )
 
@@ -136,6 +138,34 @@ func (a *API) TestTelegram(c *gin.Context) {
 		token = ""
 	}
 	if err := tgnotify.Test(token, chatID); err != nil {
+		fail(c, 400, err)
+		return
+	}
+	ok(c, gin.H{"sent": true})
+}
+
+// TestEmail sends a test message via SMTP settings.
+// POST /settings/email-test
+func (a *API) TestEmail(c *gin.Context) {
+	if err := emailnotify.Test(); err != nil {
+		fail(c, 400, err)
+		return
+	}
+	ok(c, gin.H{"sent": true})
+}
+
+// TestDiscord sends a test Discord webhook message.
+// POST /settings/discord-test { "discordWebhook"?: "..." }
+func (a *API) TestDiscord(c *gin.Context) {
+	var req struct {
+		DiscordWebhook string `json:"discordWebhook"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	webhook := strings.TrimSpace(req.DiscordWebhook)
+	if webhook == "***" || strings.Contains(webhook, "…") {
+		webhook = ""
+	}
+	if err := discordnotify.Test(webhook); err != nil {
 		fail(c, 400, err)
 		return
 	}

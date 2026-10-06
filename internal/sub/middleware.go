@@ -2,10 +2,14 @@ package sub
 
 import (
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/we1bboard/we1bboard/internal/clientonline"
+	"github.com/we1bboard/we1bboard/internal/database"
+	"github.com/we1bboard/we1bboard/internal/database/model"
 	"golang.org/x/time/rate"
 )
 
@@ -77,6 +81,37 @@ func requireSubEnabled() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !Enabled() {
 			c.AbortWithStatus(http.StatusNotFound)
+			return
+		}
+		c.Next()
+	}
+}
+
+// enforceHWID rejects subscription fetches when LimitHWID is set and the
+// X-HWID / X-Device-Id header is a new device past the limit.
+// Missing header is allowed (clients that do not send HWID still work).
+func enforceHWID() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		subID := c.Param("subId")
+		if subID == "" || !ValidSubID(subID) {
+			c.Next()
+			return
+		}
+		hwid := strings.TrimSpace(c.GetHeader("X-HWID"))
+		if hwid == "" {
+			hwid = strings.TrimSpace(c.GetHeader("X-Device-Id"))
+		}
+		if hwid == "" {
+			c.Next()
+			return
+		}
+		var clients []model.Client
+		if err := database.DB.Where("sub_id = ? AND enable = ?", subID, true).Find(&clients).Error; err != nil {
+			c.Next()
+			return
+		}
+		if !clientonline.EnforceHWIDForClients(clients, hwid) {
+			c.AbortWithStatus(http.StatusForbidden)
 			return
 		}
 		c.Next()

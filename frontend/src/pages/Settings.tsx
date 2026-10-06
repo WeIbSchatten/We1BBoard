@@ -17,6 +17,15 @@ type TwoFASetup = {
   qr?: string
 }
 
+type SubBalancer = {
+  id: number
+  name: string
+  strategy: string
+  selector: string
+  enable: boolean
+  remark: string
+}
+
 function truthy(v: string | undefined) {
   return v === 'true' || v === '1' || v === 'yes' || v === 'on'
 }
@@ -31,6 +40,10 @@ export function SettingsPage() {
   const [twoFACode, setTwoFACode] = useState('')
   const [disablePw, setDisablePw] = useState('')
   const [tgBusy, setTgBusy] = useState(false)
+  const [emailBusy, setEmailBusy] = useState(false)
+  const [discordBusy, setDiscordBusy] = useState(false)
+  const [balancers, setBalancers] = useState<SubBalancer[]>([])
+  const [balForm, setBalForm] = useState({ name: '', strategy: 'url-test', selector: '', enable: true, remark: '' })
 
   useEffect(() => {
     api<Record<string, string>>('/settings').then((s) => {
@@ -40,6 +53,7 @@ export function SettingsPage() {
       if (s.lang === 'ru' || s.lang === 'en') setLang(s.lang)
     }).catch(console.error)
     api<SubInfo>('/subscription').then(setSubInfo).catch(console.error)
+    api<SubBalancer[]>('/sub-balancers').then((r) => setBalancers(r || [])).catch(console.error)
   }, [])
 
   async function save() {
@@ -120,6 +134,68 @@ export function SettingsPage() {
     } finally {
       setTgBusy(false)
     }
+  }
+
+  async function testEmail() {
+    setMsg('')
+    setEmailBusy(true)
+    try {
+      await api('/settings/email-test', { method: 'POST', body: '{}' })
+      setMsg('Email test sent')
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'error')
+    } finally {
+      setEmailBusy(false)
+    }
+  }
+
+  async function testDiscord() {
+    setMsg('')
+    setDiscordBusy(true)
+    try {
+      const wh = settings.discordWebhook || ''
+      await api('/settings/discord-test', {
+        method: 'POST',
+        body: JSON.stringify({
+          discordWebhook: wh.includes('***') || wh.includes('…') ? '' : wh,
+        }),
+      })
+      setMsg('Discord test sent')
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'error')
+    } finally {
+      setDiscordBusy(false)
+    }
+  }
+
+  async function loadBalancers() {
+    setBalancers(await api<SubBalancer[]>('/sub-balancers') || [])
+  }
+
+  async function createBalancer() {
+    if (!balForm.name.trim()) return
+    setMsg('')
+    try {
+      await api('/sub-balancers', { method: 'POST', body: JSON.stringify(balForm) })
+      setBalForm({ name: '', strategy: 'url-test', selector: '', enable: true, remark: '' })
+      await loadBalancers()
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'error')
+    }
+  }
+
+  async function toggleBalancer(b: SubBalancer) {
+    await api(`/sub-balancers/${b.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ ...b, enable: !b.enable }),
+    })
+    await loadBalancers()
+  }
+
+  async function deleteBalancer(id: number) {
+    if (!confirm('Delete sub balancer?')) return
+    await api(`/sub-balancers/${id}`, { method: 'DELETE' })
+    await loadBalancers()
   }
 
   const subEnabled = truthy(settings.subEnable ?? 'true')
@@ -329,6 +405,150 @@ export function SettingsPage() {
             {tgBusy ? '…' : 'Test Telegram'}
           </button>
         </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 12 }}>
+        <h3 style={{ marginTop: 0 }}>Email notify</h3>
+        <p className="page-sub">SMTP login alerts via net/smtp.</p>
+        <div className="field">
+          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={truthy(settings.emailEnable)}
+              onChange={(e) => setSettings({ ...settings, emailEnable: e.target.checked ? 'true' : 'false' })}
+            />
+            emailEnable
+          </label>
+        </div>
+        <div className="grid2">
+          <div className="field">
+            <label className="label">smtpHost</label>
+            <input className="input" value={settings.smtpHost || ''} onChange={(e) => setSettings({ ...settings, smtpHost: e.target.value })} placeholder="smtp.example.com" />
+          </div>
+          <div className="field">
+            <label className="label">smtpPort</label>
+            <input className="input" value={settings.smtpPort || '587'} onChange={(e) => setSettings({ ...settings, smtpPort: e.target.value })} />
+          </div>
+          <div className="field">
+            <label className="label">smtpUser</label>
+            <input className="input" value={settings.smtpUser || ''} onChange={(e) => setSettings({ ...settings, smtpUser: e.target.value })} />
+          </div>
+          <div className="field">
+            <label className="label">smtpPass</label>
+            <input className="input" type="password" value={settings.smtpPass || ''} onChange={(e) => setSettings({ ...settings, smtpPass: e.target.value })} placeholder="***" />
+          </div>
+          <div className="field" style={{ gridColumn: '1 / -1' }}>
+            <label className="label">smtpFrom</label>
+            <input className="input" value={settings.smtpFrom || ''} onChange={(e) => setSettings({ ...settings, smtpFrom: e.target.value })} placeholder="panel@example.com" />
+          </div>
+        </div>
+        <div className="field">
+          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={truthy(settings.emailNotifyLogin)}
+              onChange={(e) => setSettings({ ...settings, emailNotifyLogin: e.target.checked ? 'true' : 'false' })}
+            />
+            emailNotifyLogin
+          </label>
+        </div>
+        <div className="row-actions">
+          <button className="btn" type="button" onClick={save}>{tr('save')}</button>
+          <button className="btn secondary" type="button" disabled={emailBusy} onClick={() => { void testEmail() }}>
+            {emailBusy ? '…' : 'Test Email'}
+          </button>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 12 }}>
+        <h3 style={{ marginTop: 0 }}>Discord notify</h3>
+        <p className="page-sub">Webhook must be https://discord.com/api/webhooks/…</p>
+        <div className="field">
+          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={truthy(settings.discordEnable)}
+              onChange={(e) => setSettings({ ...settings, discordEnable: e.target.checked ? 'true' : 'false' })}
+            />
+            discordEnable
+          </label>
+        </div>
+        <div className="field">
+          <label className="label">discordWebhook</label>
+          <input
+            className="input"
+            value={settings.discordWebhook || ''}
+            onChange={(e) => setSettings({ ...settings, discordWebhook: e.target.value })}
+            placeholder="https://discord.com/api/webhooks/…"
+          />
+        </div>
+        <div className="field">
+          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={truthy(settings.discordNotifyLogin)}
+              onChange={(e) => setSettings({ ...settings, discordNotifyLogin: e.target.checked ? 'true' : 'false' })}
+            />
+            discordNotifyLogin
+          </label>
+        </div>
+        <div className="row-actions">
+          <button className="btn" type="button" onClick={save}>{tr('save')}</button>
+          <button className="btn secondary" type="button" disabled={discordBusy} onClick={() => { void testDiscord() }}>
+            {discordBusy ? '…' : 'Test Discord'}
+          </button>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 12 }}>
+        <h3 style={{ marginTop: 0 }}>Sub balancers</h3>
+        <p className="page-sub">Clash/JSON proxy-groups (url-test over all proxies in matching sub).</p>
+        <div className="grid2">
+          <div className="field">
+            <label className="label">name</label>
+            <input className="input" value={balForm.name} onChange={(e) => setBalForm({ ...balForm, name: e.target.value })} />
+          </div>
+          <div className="field">
+            <label className="label">strategy</label>
+            <select className="select" value={balForm.strategy} onChange={(e) => setBalForm({ ...balForm, strategy: e.target.value })}>
+              <option value="url-test">url-test</option>
+              <option value="fallback">fallback</option>
+              <option value="round-robin">round-robin</option>
+            </select>
+          </div>
+          <div className="field" style={{ gridColumn: '1 / -1' }}>
+            <label className="label">selector (csv emails or inbound tags; empty = all)</label>
+            <input className="input" value={balForm.selector} onChange={(e) => setBalForm({ ...balForm, selector: e.target.value })} />
+          </div>
+          <div className="field">
+            <label className="label">remark</label>
+            <input className="input" value={balForm.remark} onChange={(e) => setBalForm({ ...balForm, remark: e.target.value })} />
+          </div>
+        </div>
+        <button className="btn" type="button" onClick={() => { void createBalancer() }}>{tr('create')}</button>
+        <table className="table" style={{ marginTop: 12 }}>
+          <thead>
+            <tr><th>Name</th><th>Strategy</th><th>Selector</th><th>{tr('status')}</th><th>{tr('actions')}</th></tr>
+          </thead>
+          <tbody>
+            {balancers.length === 0 && <tr><td colSpan={5}>{tr('empty')}</td></tr>}
+            {balancers.map((b) => (
+              <tr key={b.id}>
+                <td>{b.name}</td>
+                <td>{b.strategy}</td>
+                <td style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.selector || '—'}</td>
+                <td>
+                  <button className="btn secondary" type="button" onClick={() => { void toggleBalancer(b) }}>
+                    {b.enable ? tr('enable') : tr('disable')}
+                  </button>
+                </td>
+                <td>
+                  <button className="btn danger" type="button" onClick={() => { void deleteBalancer(b.id) }}>{tr('delete')}</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
 
       <div className="card" style={{ marginTop: 12 }}>

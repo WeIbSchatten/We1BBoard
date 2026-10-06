@@ -20,6 +20,7 @@ import (
 	"github.com/we1bboard/we1bboard/internal/web/controller"
 	"github.com/we1bboard/we1bboard/internal/web/history"
 	"github.com/we1bboard/we1bboard/internal/web/middleware"
+	"github.com/we1bboard/we1bboard/internal/web/observatory"
 	"github.com/we1bboard/we1bboard/internal/web/runtime"
 	"github.com/we1bboard/we1bboard/internal/web/service"
 	"github.com/we1bboard/we1bboard/internal/web/tlsutil"
@@ -65,6 +66,7 @@ func (s *Server) Start() error {
 	r.Use(middleware.CSRFOriginCheck())
 
 	history.Start()
+	observatory.Start()
 
 	api := &controller.API{
 		Auth:     &service.AuthService{},
@@ -139,6 +141,14 @@ func (s *Server) Start() error {
 			sess.POST("/clients", api.CreateClient)
 			sess.POST("/clients/bulk-adjust", api.BulkAdjustClients)
 			sess.POST("/clients/bulk-attach", api.BulkAttachClients)
+			sess.POST("/clients/bulk-detach", api.BulkDetachClients)
+			sess.GET("/clients/onlines", api.ClientsOnlines)
+			sess.GET("/clients/ips/:email", api.ClientIPs)
+			sess.DELETE("/clients/ips/:email", api.ClearClientIPs)
+			sess.GET("/clients/hwids/:email", api.ClientHWIDs)
+			sess.POST("/clients/hwids/:email", api.AddClientHWID)
+			sess.DELETE("/clients/hwids/:email/:id", api.DeleteClientHWID)
+			sess.DELETE("/clients/hwids/:email", api.ClearClientHWIDs)
 			sess.GET("/clients/groups", api.ListClientGroups)
 			sess.POST("/clients/groups", api.CreateClientGroup)
 			sess.POST("/clients/groups/rename", api.RenameClientGroup)
@@ -179,6 +189,12 @@ func (s *Server) Start() error {
 			sess.PUT("/nodes/:id", api.UpdateNode)
 			sess.DELETE("/nodes/:id", api.DeleteNode)
 			sess.POST("/nodes/ping", api.PingNodes)
+			sess.GET("/nodes/:id/history", api.NodeHistory)
+
+			sess.GET("/sub-balancers", api.ListSubBalancers)
+			sess.POST("/sub-balancers", api.CreateSubBalancer)
+			sess.PUT("/sub-balancers/:id", api.UpdateSubBalancer)
+			sess.DELETE("/sub-balancers/:id", api.DeleteSubBalancer)
 
 			sess.GET("/bridges", api.ListBridges)
 			sess.POST("/bridges", api.CreateBridge)
@@ -206,16 +222,22 @@ func (s *Server) Start() error {
 			sess.POST("/settings/2fa/enable", api.Enable2FA)
 			sess.POST("/settings/2fa/disable", api.Disable2FA)
 			sess.POST("/settings/tg-test", api.TestTelegram)
+			sess.POST("/settings/email-test", api.TestEmail)
+			sess.POST("/settings/discord-test", api.TestDiscord)
 
 			sess.GET("/xray/config", api.XrayConfig)
 			sess.GET("/xray/config-issues", api.XrayConfigIssues)
 			sess.GET("/xray/logs", api.XrayLogs)
 			sess.GET("/logs/panel", api.PanelLogs)
+			sess.GET("/logs/amneziawg", api.AmneziaWGLogs)
 			sess.GET("/xray/template", api.GetXrayTemplate)
 			sess.POST("/xray/template", api.SetXrayTemplate)
 			sess.GET("/xray/template/default", api.GetXrayTemplateDefault)
 			sess.POST("/xray/route-test", api.XrayRouteTest)
 			sess.POST("/xray/warp/generate", api.WarpGenerate)
+			sess.POST("/xray/nord/template", api.NordTemplate)
+			sess.POST("/xray/pia/template", api.PIATemplate)
+			sess.GET("/xray/observatory", api.XrayObservatory)
 		}
 	}
 

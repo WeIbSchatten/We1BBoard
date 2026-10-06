@@ -501,6 +501,58 @@ func (s *ClientService) BulkAttach(ids []uint, inboundIDs []uint) (int, error) {
 	return n, nil
 }
 
+// BulkDetach removes inbound IDs from each client's membership csv.
+// If the primary inbound was removed, primary becomes the first remaining.
+// Clients that would end with zero inbounds are skipped.
+func (s *ClientService) BulkDetach(ids []uint, inboundIDs []uint) (int, error) {
+	if len(ids) == 0 {
+		return 0, fmt.Errorf("ids required")
+	}
+	if len(inboundIDs) == 0 {
+		return 0, fmt.Errorf("inboundIds required")
+	}
+	remove := map[uint]bool{}
+	for _, id := range inboundIDs {
+		if id > 0 {
+			remove[id] = true
+		}
+	}
+	if len(remove) == 0 {
+		return 0, fmt.Errorf("inboundIds required")
+	}
+	var clients []model.Client
+	if err := database.DB.Where("id IN ?", ids).Find(&clients).Error; err != nil {
+		return 0, err
+	}
+	n := 0
+	for i := range clients {
+		c := &clients[i]
+		current := model.ParseInboundIDList(c)
+		remaining := make([]uint, 0, len(current))
+		changed := false
+		for _, id := range current {
+			if remove[id] {
+				changed = true
+				continue
+			}
+			remaining = append(remaining, id)
+		}
+		if !changed || len(remaining) == 0 {
+			continue
+		}
+		model.NormalizeInboundIDs(c, remaining)
+		if err := database.DB.Model(c).Updates(map[string]any{
+			"inbound_id":  c.InboundID,
+			"inbound_ids": c.InboundIDs,
+		}).Error; err != nil {
+			return n, err
+		}
+		_ = s.reloadForClient(c)
+		n++
+	}
+	return n, nil
+}
+
 func (s *ClientService) ShareLink(id uint, host string) (string, error) {
 	links, err := s.ShareLinks(id, host)
 	if err != nil {

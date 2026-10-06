@@ -16,6 +16,7 @@ import (
 	psnet "github.com/shirou/gopsutil/v4/net"
 	"github.com/skip2/go-qrcode"
 	"github.com/we1bboard/we1bboard/internal/bridge"
+	"github.com/we1bboard/we1bboard/internal/clientonline"
 	"github.com/we1bboard/we1bboard/internal/config"
 	"github.com/we1bboard/we1bboard/internal/database"
 	"github.com/we1bboard/we1bboard/internal/database/model"
@@ -23,9 +24,12 @@ import (
 	"github.com/we1bboard/we1bboard/internal/protocol"
 	"github.com/we1bboard/we1bboard/internal/security"
 	"github.com/we1bboard/we1bboard/internal/sub"
+	"github.com/we1bboard/we1bboard/internal/discordnotify"
+	"github.com/we1bboard/we1bboard/internal/emailnotify"
 	"github.com/we1bboard/we1bboard/internal/tgnotify"
 	"github.com/we1bboard/we1bboard/internal/tgproxy"
 	"github.com/we1bboard/we1bboard/internal/web/middleware"
+	"github.com/we1bboard/we1bboard/internal/web/nodehist"
 	"github.com/we1bboard/we1bboard/internal/web/rates"
 	"github.com/we1bboard/we1bboard/internal/web/runtime"
 	"github.com/we1bboard/we1bboard/internal/web/service"
@@ -99,7 +103,10 @@ func (a *API) Login(c *gin.Context) {
 	sess.Set("uid", u.ID)
 	sess.Set("username", u.Username)
 	_ = sess.Save()
-	go tgnotify.NotifyLogin(u.Username, c.ClientIP())
+	ip := c.ClientIP()
+	go tgnotify.NotifyLogin(u.Username, ip)
+	go emailnotify.NotifyLogin(u.Username, ip)
+	go discordnotify.NotifyLogin(u.Username, ip)
 	ok(c, gin.H{"username": u.Username})
 }
 
@@ -316,6 +323,103 @@ func (a *API) BulkAttachClients(c *gin.Context) {
 	ok(c, gin.H{"count": n})
 }
 
+func (a *API) BulkDetachClients(c *gin.Context) {
+	var req struct {
+		IDs        []uint `json:"ids"`
+		InboundIDs []uint `json:"inboundIds"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, 400, err)
+		return
+	}
+	n, err := a.Client.BulkDetach(req.IDs, req.InboundIDs)
+	if err != nil {
+		fail(c, 400, err)
+		return
+	}
+	ok(c, gin.H{"count": n})
+}
+
+func (a *API) ClientsOnlines(c *gin.Context) {
+	emails, m := clientonline.Snapshot()
+	if emails == nil {
+		emails = []string{}
+	}
+	if m == nil {
+		m = map[string]int64{}
+	}
+	ok(c, gin.H{"emails": emails, "map": m})
+}
+
+func (a *API) ClientIPs(c *gin.Context) {
+	email := c.Param("email")
+	rows, err := clientonline.ListIPs(email)
+	if err != nil {
+		fail(c, 500, err)
+		return
+	}
+	out := make([]gin.H, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, gin.H{"ip": r.IP, "lastSeen": r.LastSeen})
+	}
+	ok(c, out)
+}
+
+func (a *API) ClearClientIPs(c *gin.Context) {
+	email := c.Param("email")
+	if err := clientonline.ClearIPs(email); err != nil {
+		fail(c, 500, err)
+		return
+	}
+	ok(c, nil)
+}
+
+func (a *API) ClientHWIDs(c *gin.Context) {
+	email := c.Param("email")
+	rows, err := clientonline.ListHWIDs(email)
+	if err != nil {
+		fail(c, 500, err)
+		return
+	}
+	ok(c, rows)
+}
+
+func (a *API) AddClientHWID(c *gin.Context) {
+	email := c.Param("email")
+	var req struct {
+		HWID string `json:"hwid"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, 400, err)
+		return
+	}
+	row, err := clientonline.AddHWID(email, req.HWID)
+	if err != nil {
+		fail(c, 400, err)
+		return
+	}
+	ok(c, row)
+}
+
+func (a *API) DeleteClientHWID(c *gin.Context) {
+	email := c.Param("email")
+	id, _ := strconv.Atoi(c.Param("id"))
+	if err := clientonline.DeleteHWID(email, uint(id)); err != nil {
+		fail(c, 404, err)
+		return
+	}
+	ok(c, nil)
+}
+
+func (a *API) ClearClientHWIDs(c *gin.Context) {
+	email := c.Param("email")
+	if err := clientonline.ClearHWIDs(email); err != nil {
+		fail(c, 500, err)
+		return
+	}
+	ok(c, nil)
+}
+
 func (a *API) ClientLink(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
 	host := c.Query("host")
@@ -435,8 +539,8 @@ func (a *API) UpdateSettings(c *gin.Context) {
 		}
 		// Keep existing secret when UI sends masked placeholder.
 		if database.SensitiveSettings[k] && (v == "***" || strings.Contains(v, "…") || v == "") {
-			if v == "" && database.GetSetting(k) != "" && k == "tgBotToken" {
-				continue // blank = leave unchanged when token already set
+			if v == "" && database.GetSetting(k) != "" && (k == "tgBotToken" || k == "smtpPass" || k == "discordWebhook") {
+				continue // blank = leave unchanged when secret already set
 			}
 			if v == "***" || strings.Contains(v, "…") {
 				continue
@@ -779,6 +883,17 @@ func (a *API) DeleteNode(c *gin.Context) {
 func (a *API) PingNodes(c *gin.Context) {
 	a.RT.PingNodes()
 	a.ListNodes(c) // reuse masked DTO — never echo full node tokens
+}
+
+// NodeHistory returns in-memory online/latency rings for a node.
+// GET /nodes/:id/history
+func (a *API) NodeHistory(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	if id <= 0 {
+		fail(c, 400, fmt.Errorf("invalid id"))
+		return
+	}
+	ok(c, nodehist.Get(uint(id)))
 }
 
 func (a *API) ListBridges(c *gin.Context) {

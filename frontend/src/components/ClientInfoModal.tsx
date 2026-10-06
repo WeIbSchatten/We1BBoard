@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { API_BASE, api, type Client, type Inbound } from '../api'
+import { API_BASE, api, type Client, type ClientHWIDRow, type ClientIPRow, type Inbound } from '../api'
 import { useApp } from '../AppContext'
 
-type Tab = 'info' | 'links' | 'sub' | 'qr'
+type Tab = 'info' | 'links' | 'sub' | 'qr' | 'ips' | 'hwids'
 
 type Props = {
   open: boolean
   client: Client | null
   inbounds?: Inbound[]
+  online?: boolean
   initialTab?: Tab
   onClose: () => void
   onResetTraffic?: () => void
@@ -46,11 +47,17 @@ async function copyText(text: string) {
   }
 }
 
-export function ClientInfoModal({ open, client, inbounds = [], initialTab = 'info', onClose, onResetTraffic }: Props) {
+function encEmail(email: string) {
+  return encodeURIComponent(email)
+}
+
+export function ClientInfoModal({ open, client, inbounds = [], online = false, initialTab = 'info', onClose, onResetTraffic }: Props) {
   const { tr } = useApp()
   const [tab, setTab] = useState<Tab>('info')
   const [links, setLinks] = useState<string[]>([])
   const [subUrls, setSubUrls] = useState<Record<string, string> | null>(null)
+  const [ips, setIps] = useState<ClientIPRow[]>([])
+  const [hwids, setHwids] = useState<ClientHWIDRow[]>([])
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
 
@@ -71,7 +78,6 @@ export function ClientInfoModal({ open, client, inbounds = [], initialTab = 'inf
       const data = await api<{ links: string[] }>(`/clients/${client.id}/links`)
       setLinks(data.links || [])
     } catch (e) {
-      // Fallback to single-link endpoint
       try {
         const one = await api<{ link: string }>(`/clients/${client.id}/link`)
         setLinks(one.link ? one.link.split('\n').filter(Boolean) : [])
@@ -99,19 +105,51 @@ export function ClientInfoModal({ open, client, inbounds = [], initialTab = 'inf
     }
   }, [client])
 
+  const loadIps = useCallback(async () => {
+    if (!client) return
+    setBusy(true)
+    setMsg('')
+    try {
+      setIps(await api<ClientIPRow[]>(`/clients/ips/${encEmail(client.email)}`))
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'error')
+      setIps([])
+    } finally {
+      setBusy(false)
+    }
+  }, [client])
+
+  const loadHwids = useCallback(async () => {
+    if (!client) return
+    setBusy(true)
+    setMsg('')
+    try {
+      setHwids(await api<ClientHWIDRow[]>(`/clients/hwids/${encEmail(client.email)}`))
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'error')
+      setHwids([])
+    } finally {
+      setBusy(false)
+    }
+  }, [client])
+
   useEffect(() => {
     if (!open || !client) return
     setTab(initialTab)
     setMsg('')
     setLinks([])
     setSubUrls(null)
+    setIps([])
+    setHwids([])
   }, [open, client, initialTab])
 
   useEffect(() => {
     if (!open || !client) return
     if (tab === 'links') void loadLinks()
     if (tab === 'sub') void loadSub()
-  }, [open, client, tab, loadLinks, loadSub])
+    if (tab === 'ips') void loadIps()
+    if (tab === 'hwids') void loadHwids()
+  }, [open, client, tab, loadLinks, loadSub, loadIps, loadHwids])
 
   if (!open || !client) return null
 
@@ -129,11 +167,53 @@ export function ClientInfoModal({ open, client, inbounds = [], initialTab = 'inf
     }
   }
 
+  async function clearIps() {
+    if (!confirm(tr('clearIps') + '?')) return
+    setBusy(true)
+    try {
+      await api(`/clients/ips/${encEmail(client!.email)}`, { method: 'DELETE' })
+      setIps([])
+      setMsg('OK')
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function clearHwids() {
+    if (!confirm(tr('clearHwids') + '?')) return
+    setBusy(true)
+    try {
+      await api(`/clients/hwids/${encEmail(client!.email)}`, { method: 'DELETE' })
+      setHwids([])
+      setMsg('OK')
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function deleteHwid(id: number) {
+    setBusy(true)
+    try {
+      await api(`/clients/hwids/${encEmail(client!.email)}/${id}`, { method: 'DELETE' })
+      await loadHwids()
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const tabs: { id: Tab; label: string }[] = [
     { id: 'info', label: tr('tabGeneral') },
     { id: 'links', label: tr('link') },
     { id: 'sub', label: tr('subscription') },
     { id: 'qr', label: 'QR' },
+    { id: 'ips', label: 'IPs' },
+    { id: 'hwids', label: 'HWID' },
   ]
 
   return (
@@ -141,10 +221,14 @@ export function ClientInfoModal({ open, client, inbounds = [], initialTab = 'inf
       <div className="modal" style={{ width: 'min(640px, 100%)' }} onClick={(e) => e.stopPropagation()}>
         <div className="page-head" style={{ marginBottom: 8 }}>
           <div>
-            <h3 style={{ margin: 0 }}>{client.email}</h3>
+            <h3 style={{ margin: 0 }}>
+              {client.email}{' '}
+              {online && <span className="badge on">{tr('online')}</span>}
+            </h3>
             <p className="page-sub" style={{ margin: '4px 0 0' }}>
               {client.enable ? tr('enable') : tr('disable')}
               {client.group ? ` · ${client.group}` : ''}
+              {online ? ` · ${tr('online')}` : ''}
             </p>
           </div>
           <button type="button" className="btn secondary" onClick={onClose}>{tr('cancel')}</button>
@@ -198,6 +282,14 @@ export function ClientInfoModal({ open, client, inbounds = [], initialTab = 'inf
               <div className="field">
                 <label className="label">Expiry</label>
                 <input className="input" readOnly value={expiryLabel(client)} />
+              </div>
+              <div className="field">
+                <label className="label">Status</label>
+                <input className="input" readOnly value={online ? tr('online') : 'offline'} />
+              </div>
+              <div className="field">
+                <label className="label">Limit IP / HWID</label>
+                <input className="input" readOnly value={`${client.limitIp || 0} / ${client.limitHwid || 0}`} />
               </div>
             </div>
             <div className="field" style={{ marginTop: 8 }}>
@@ -272,6 +364,71 @@ export function ClientInfoModal({ open, client, inbounds = [], initialTab = 'inf
               style={{ width: 220, height: 220, background: '#fff', padding: 10, borderRadius: 10 }}
             />
             <p className="page-sub">{tr('link')} QR</p>
+          </div>
+        )}
+
+        {tab === 'ips' && (
+          <div>
+            <div className="row-actions" style={{ marginBottom: 8 }}>
+              <button type="button" className="btn secondary" disabled={busy} onClick={() => void loadIps()}>{tr('refresh')}</button>
+              <button type="button" className="btn danger" disabled={busy || ips.length === 0} onClick={() => void clearIps()}>{tr('clearIps')}</button>
+            </div>
+            {busy && <p className="page-sub">…</p>}
+            {ips.length === 0 && !busy && <p className="page-sub">{tr('empty')}</p>}
+            {ips.length > 0 && (
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>IP</th>
+                    <th>Last seen</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ips.map((row) => (
+                    <tr key={row.ip}>
+                      <td><code style={{ fontFamily: 'var(--mono)' }}>{row.ip}</code></td>
+                      <td>{row.lastSeen ? new Date(row.lastSeen).toLocaleString() : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+
+        {tab === 'hwids' && (
+          <div>
+            <div className="row-actions" style={{ marginBottom: 8 }}>
+              <button type="button" className="btn secondary" disabled={busy} onClick={() => void loadHwids()}>{tr('refresh')}</button>
+              <button type="button" className="btn danger" disabled={busy || hwids.length === 0} onClick={() => void clearHwids()}>{tr('clearHwids')}</button>
+            </div>
+            <p className="page-sub" style={{ marginBottom: 8 }}>
+              Limit: {client.limitHwid || 0} (0 = ∞) · registered: {hwids.length}
+            </p>
+            {busy && <p className="page-sub">…</p>}
+            {hwids.length === 0 && !busy && <p className="page-sub">{tr('empty')}</p>}
+            {hwids.length > 0 && (
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>HWID</th>
+                    <th>Created</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {hwids.map((row) => (
+                    <tr key={row.id}>
+                      <td><code style={{ fontFamily: 'var(--mono)', fontSize: '0.8rem' }}>{row.hwid}</code></td>
+                      <td>{row.createdAt ? new Date(row.createdAt).toLocaleString() : '—'}</td>
+                      <td>
+                        <button type="button" className="btn danger" disabled={busy} onClick={() => void deleteHwid(row.id)}>{tr('delete')}</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         )}
 
