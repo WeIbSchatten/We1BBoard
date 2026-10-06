@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# We1BBoard interactive installer for Ubuntu/Debian (3x-ui style choices)
-# Usage:
-#   bash scripts/install.sh
-#   bash scripts/install.sh install
+# We1BBoard interactive installer for Ubuntu/Debian (3x-ui style)
+#
+# One command (recommended):
+#   bash <(curl -Ls https://raw.githubusercontent.com/WeIbSchatten/We1BBoard/main/install.sh)
+# Specific version:
+#   bash <(curl -Ls https://raw.githubusercontent.com/WeIbSchatten/We1BBoard/main/install.sh) v1.0.0
+# After install:
+#   we1bboard
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -14,40 +18,72 @@ NC='\033[0m'
 
 APP_NAME="we1bboard"
 INSTALL_DIR="/usr/local/we1bboard"
-BIN_PATH="/usr/local/bin/${APP_NAME}"
+PANEL_BIN="${INSTALL_DIR}/we1bboard"
+BIN_PATH="${PANEL_BIN}"
+MGMT_BIN="/usr/bin/we1bboard"
 SERVICE_PATH="/etc/systemd/system/${APP_NAME}.service"
 ENV_FILE="/etc/default/we1bboard"
 DATA_DIR="/etc/we1bboard"
 CERT_ROOT="/root/cert"
 REPO_RELEASE_BASE="${WE1B_RELEASE_BASE:-https://github.com/WeIbSchatten/We1BBoard/releases/latest/download}"
 REPO="WeIbSchatten/We1BBoard"
-NONINTERACTIVE="${WE1B_NONINTERACTIVE:-0}"
-REQUESTED_VERSION="${1:-}"
-# allow: bash install.sh install | bash install.sh v1.0.0 | bash install.sh install v1.0.0
-INSTALL_MODE="menu"
+RAW_BASE="https://raw.githubusercontent.com/${REPO}/main"
+
+# Non-interactive: WE1B_NONINTERACTIVE=1 or stdin is not a TTY (curl | bash, cloud-init)
+if [[ "${WE1B_NONINTERACTIVE:-0}" == "1" ]] || [[ ! -t 0 ]]; then
+  NONINTERACTIVE=1
+else
+  NONINTERACTIVE=0
+fi
+
+# Default: install immediately (like 3x-ui). Use "menu" for the control menu.
+INSTALL_MODE="install"
 TARGET_TAG=""
-case "${REQUESTED_VERSION}" in
-  install)
+ARG1="${1:-}"
+case "${ARG1}" in
+  --install|install)
     INSTALL_MODE="install"
     TARGET_TAG="${2:-}"
     ;;
-  ssl)
+  menu|--menu)
+    INSTALL_MODE="menu"
+    ;;
+  ssl|--ssl)
     INSTALL_MODE="ssl"
     ;;
-  v*|"" )
-    if [[ -n "${REQUESTED_VERSION}" && "${REQUESTED_VERSION}" == v* ]]; then
-      INSTALL_MODE="install"
-      TARGET_TAG="${REQUESTED_VERSION}"
-    fi
+  -h|--help|help)
+    cat <<EOF
+We1BBoard installer
+
+  bash <(curl -Ls https://raw.githubusercontent.com/${REPO}/main/install.sh)
+  bash <(curl -Ls https://raw.githubusercontent.com/${REPO}/main/install.sh) v1.0.0
+
+  Arguments:
+    (none) / install   Install or reinstall panel
+    vX.Y.Z             Install specific release tag
+    menu               Open management menu
+    ssl                SSL certificate setup only
+EOF
+    exit 0
+    ;;
+  v*)
+    INSTALL_MODE="install"
+    TARGET_TAG="${ARG1}"
+    ;;
+  "")
+    INSTALL_MODE="install"
     ;;
   *)
-    if [[ "${REQUESTED_VERSION}" =~ ^[0-9]+\. ]]; then
+    if [[ "${ARG1}" =~ ^[0-9]+\. ]]; then
       INSTALL_MODE="install"
-      TARGET_TAG="v${REQUESTED_VERSION}"
+      TARGET_TAG="v${ARG1}"
+    else
+      err() { echo "$*" >&2; }
+      echo "Unknown argument: ${ARG1} (try --help)" >&2
+      exit 1
     fi
     ;;
 esac
-
 
 SSL_HOST=""
 SSL_SCHEME="http"
@@ -60,7 +96,7 @@ err() { echo -e "${RED}[error]${NC} $*" >&2; }
 
 need_root() {
   if [[ ${EUID} -ne 0 ]]; then
-    err "Run as root"
+    err "Run as root (sudo -i or: curl ... | sudo bash)"
     exit 1
   fi
 }
@@ -113,9 +149,41 @@ install_deps() {
   if command -v apt-get >/dev/null 2>&1; then
     apt-get update -y
     apt-get install -y curl wget tar ca-certificates unzip socat cron
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y curl wget tar ca-certificates unzip socat cronie
   elif command -v yum >/dev/null 2>&1; then
     yum install -y curl wget tar ca-certificates unzip socat cronie
   fi
+}
+
+install_mgmt_script() {
+  local tmp
+  tmp="$(mktemp)"
+  local src=""
+  if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
+    local here
+    here="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
+    if [[ -n "${here}" && -f "${here}/we1bboard.sh" ]]; then
+      src="${here}/we1bboard.sh"
+    elif [[ -n "${here}" && -f "${here}/scripts/we1bboard.sh" ]]; then
+      src="${here}/scripts/we1bboard.sh"
+    fi
+  fi
+  if [[ -n "${src}" ]]; then
+    cp -f "${src}" "${tmp}"
+  else
+    if ! curl -fsSL "${RAW_BASE}/scripts/we1bboard.sh" -o "${tmp}"; then
+      err "Failed to download management script"
+      rm -f "${tmp}"
+      return 1
+    fi
+  fi
+  install -m 755 "${tmp}" "${MGMT_BIN}"
+  ln -sf "${MGMT_BIN}" /usr/bin/we1bboard-ctl
+  rm -f "${tmp}"
+  # `we1bboard` in PATH = management script (like x-ui); panel binary stays under INSTALL_DIR
+  rm -f /usr/local/bin/we1bboard 2>/dev/null || true
+  log "Management command: we1bboard"
 }
 
 download_panel() {
@@ -132,34 +200,29 @@ download_panel() {
     url="${REPO_RELEASE_BASE}/we1bboard-linux-${arch}.tar.gz"
   fi
   log "Downloading ${url}"
-  if ! curl -fsSL "${url}" -o "${tmp}/panel.tar.gz"; then
+  if ! curl -fL --retry 3 --retry-delay 2 -o "${tmp}/panel.tar.gz" "${url}"; then
     warn "Release archive not found — expecting local binary ./we1bboard"
     if [[ -f ./we1bboard ]]; then
-      cp ./we1bboard "${INSTALL_DIR}/we1bboard"
+      cp ./we1bboard "${PANEL_BIN}"
     else
       err "Place we1bboard binary next to install.sh or publish a GitHub Release"
+      rm -rf "${tmp}"
       exit 1
     fi
   else
     tar -xzf "${tmp}/panel.tar.gz" -C "${tmp}"
     if [[ -f "${tmp}/we1bboard" ]]; then
-      cp "${tmp}/we1bboard" "${INSTALL_DIR}/we1bboard"
+      cp "${tmp}/we1bboard" "${PANEL_BIN}"
     elif [[ -f "${tmp}/we1bboard/we1bboard" ]]; then
-      cp "${tmp}/we1bboard/we1bboard" "${INSTALL_DIR}/we1bboard"
+      cp "${tmp}/we1bboard/we1bboard" "${PANEL_BIN}"
     else
       err "Archive layout unexpected"
+      rm -rf "${tmp}"
       exit 1
     fi
   fi
-  chmod +x "${INSTALL_DIR}/we1bboard"
-  ln -sf "${INSTALL_DIR}/we1bboard" "${BIN_PATH}"
-  # control script
-  if [[ -f "$(dirname "$0")/we1bboard.sh" ]]; then
-    install -m 755 "$(dirname "$0")/we1bboard.sh" /usr/bin/we1bboard-ctl
-  else
-    curl -fsSL "https://raw.githubusercontent.com/${REPO}/main/scripts/we1bboard.sh" -o /usr/bin/we1bboard-ctl || true
-    chmod +x /usr/bin/we1bboard-ctl 2>/dev/null || true
-  fi
+  chmod +x "${PANEL_BIN}"
+  install_mgmt_script
   rm -rf "${tmp}"
 }
 
@@ -185,7 +248,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=-${ENV_FILE}
-ExecStart=${INSTALL_DIR}/we1bboard run
+ExecStart=${PANEL_BIN} run
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=1048576
@@ -254,7 +317,6 @@ install_acme() {
 apply_panel_cert() {
   local cert="$1" key="$2"
   export WE1B_DATA_DIR="${DATA_DIR}"
-  # Load env for postgres if any
   # shellcheck disable=SC1090
   [[ -f "${ENV_FILE}" ]] && set -a && source "${ENV_FILE}" && set +a
   "${BIN_PATH}" cert -webCert "${cert}" -webCertKey "${key}"
@@ -362,11 +424,13 @@ setup_custom_certificate() {
     prompt cert "Path to fullchain/certificate (.pem/.crt)" ""
     if [[ -f "${cert}" && -s "${cert}" ]]; then break; fi
     err "File not found or empty: ${cert}"
+    [[ "${NONINTERACTIVE}" == "1" ]] && return 1
   done
   while true; do
     prompt key "Path to private key (.pem/.key)" ""
     if [[ -f "${key}" && -s "${key}" ]]; then break; fi
     err "File not found or empty: ${key}"
+    [[ "${NONINTERACTIVE}" == "1" ]] && return 1
   done
   apply_panel_cert "${cert}" "${key}"
   SSL_HOST="${domain:-$(get_server_ip)}"
@@ -390,7 +454,7 @@ prompt_and_setup_ssl() {
 
   local ssl_choice="2"
   if [[ "${NONINTERACTIVE}" == "1" ]]; then
-    case "${WE1B_SSL_MODE:-ip}" in
+    case "${WE1B_SSL_MODE:-none}" in
       domain) ssl_choice="1" ;;
       ip) ssl_choice="2" ;;
       custom) ssl_choice="3" ;;
@@ -485,10 +549,26 @@ print_access() {
   if [[ "${SSL_SCHEME}" == "https" ]]; then
     log "TLS: enabled (acme auto-renew restarts ${APP_NAME})"
   fi
+  echo
+  echo -e "┌───────────────────────────────────────────────────────┐"
+  echo -e "│ ${BLUE}we1bboard${NC} control menu (like x-ui):                   │"
+  echo -e "│                                                       │"
+  echo -e "│ ${BLUE}we1bboard${NC}              - Admin management menu        │"
+  echo -e "│ ${BLUE}we1bboard start${NC}        - Start                        │"
+  echo -e "│ ${BLUE}we1bboard stop${NC}         - Stop                         │"
+  echo -e "│ ${BLUE}we1bboard restart${NC}      - Restart                      │"
+  echo -e "│ ${BLUE}we1bboard status${NC}       - Status                       │"
+  echo -e "│ ${BLUE}we1bboard update${NC}       - Update to latest             │"
+  echo -e "│ ${BLUE}we1bboard legacy${NC}       - Install specific version     │"
+  echo -e "│ ${BLUE}we1bboard rollback${NC}     - Rollback previous binary     │"
+  echo -e "│ ${BLUE}we1bboard ssl${NC}          - SSL certificate setup        │"
+  echo -e "│ ${BLUE}we1bboard uninstall${NC}    - Uninstall                    │"
+  echo -e "└───────────────────────────────────────────────────────┘"
 }
 
 do_install() {
   need_root
+  log "Running We1BBoard installer..."
   install_deps
   download_panel "$(detect_arch)"
   choose_database
@@ -497,6 +577,7 @@ do_install() {
   prompt_and_setup_ssl
   start_panel
   print_access
+  log "Installation finished."
 }
 
 ssl_menu_only() {
@@ -564,7 +645,7 @@ menu() {
         ;;
       13)
         systemctl disable --now "${APP_NAME}" || true
-        rm -f "${SERVICE_PATH}" "${BIN_PATH}" "${ENV_FILE}" /usr/bin/we1bboard-ctl
+        rm -f "${SERVICE_PATH}" "${ENV_FILE}" "${MGMT_BIN}" /usr/bin/we1bboard-ctl /usr/local/bin/we1bboard
         rm -rf "${INSTALL_DIR}"
         systemctl daemon-reload
         log "Uninstalled (data kept at ${DATA_DIR}, certs at ${CERT_ROOT})"

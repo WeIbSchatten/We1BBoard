@@ -67,6 +67,9 @@ func env(key, def string) string {
 	return def
 }
 
+// Env is the exported alias of env for other packages.
+func Env(key, def string) string { return env(key, def) }
+
 func EnvInt(key string, def int) int {
 	v := os.Getenv(key)
 	if v == "" {

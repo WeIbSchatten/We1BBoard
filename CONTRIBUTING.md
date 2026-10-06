@@ -17,7 +17,13 @@ go build -o we1bboard ./cmd/we1bboard
 ## Server update
 
 ```bash
-we1bboard-ctl update
-we1bboard-ctl legacy    # pin version
-we1bboard-ctl rollback  # previous binary
+we1bboard update
+we1bboard legacy    # pin version
+we1bboard rollback  # previous binary
+```
+
+## Install (VPS)
+
+```bash
+bash <(curl -Ls https://raw.githubusercontent.com/WeIbSchatten/We1BBoard/main/install.sh)
 ```

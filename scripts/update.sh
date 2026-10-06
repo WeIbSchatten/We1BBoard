@@ -15,12 +15,13 @@ NC='\033[0m'
 APP_NAME="we1bboard"
 REPO="WeIbSchatten/We1BBoard"
 INSTALL_DIR="/usr/local/we1bboard"
-BIN_PATH="/usr/local/bin/${APP_NAME}"
+PANEL_BIN="${INSTALL_DIR}/we1bboard"
+BIN_PATH="${PANEL_BIN}"
 SERVICE_PATH="/etc/systemd/system/${APP_NAME}.service"
 ENV_FILE="/etc/default/we1bboard"
 DATA_DIR="/etc/we1bboard"
 BACKUP_DIR="${INSTALL_DIR}/backups"
-MGMT_SCRIPT="/usr/bin/we1bboard-ctl"
+MGMT_SCRIPT="/usr/bin/we1bboard"
 
 log() { echo -e "${GREEN}[update]${NC} $*"; }
 warn() { echo -e "${YELLOW}[warn]${NC} $*"; }
@@ -95,8 +96,9 @@ install_mgmt_script() {
   if curl -fsSL "${src_url}" -o "${MGMT_SCRIPT}.tmp" 2>/dev/null; then
     mv "${MGMT_SCRIPT}.tmp" "${MGMT_SCRIPT}"
     chmod +x "${MGMT_SCRIPT}"
-    ln -sf "${MGMT_SCRIPT}" /usr/bin/we1bboard-menu 2>/dev/null || true
-    log "Management script updated: we1bboard-ctl"
+    ln -sf "${MGMT_SCRIPT}" /usr/bin/we1bboard-ctl 2>/dev/null || true
+    rm -f /usr/local/bin/we1bboard 2>/dev/null || true
+    log "Management script updated: we1bboard"
   else
     warn "Could not refresh management script from GitHub (optional)"
     rm -f "${MGMT_SCRIPT}.tmp"
@@ -149,7 +151,7 @@ do_update() {
 
   mkdir -p "${INSTALL_DIR}/bin" "${DATA_DIR}"
   install -m 755 "${tmp}/we1bboard.bin" "${INSTALL_DIR}/we1bboard"
-  ln -sf "${INSTALL_DIR}/we1bboard" "${BIN_PATH}"
+  rm -f /usr/local/bin/we1bboard 2>/dev/null || true
 
   # refresh systemd unit if shipped later; keep existing env
   if [[ ! -f "${SERVICE_PATH}" ]]; then
@@ -182,14 +184,14 @@ EOF
   local newv
   newv="$(current_version)"
   log "Updated ${cur} → ${newv} (${tag})"
-  log "Quick rollback: we1bboard-ctl rollback   OR   bash update.sh rollback"
+  log "Quick rollback: we1bboard rollback   OR   bash update.sh rollback"
 }
 
 do_rollback_prev() {
   need_root
   if [[ ! -x "${INSTALL_DIR}/we1bboard.prev" ]]; then
     err "No previous binary at ${INSTALL_DIR}/we1bboard.prev"
-    err "Use: we1bboard-ctl legacy   to install a specific release tag"
+    err "Use: we1bboard legacy   to install a specific release tag"
     exit 1
   fi
   systemctl stop "${APP_NAME}" >/dev/null 2>&1 || true
@@ -199,7 +201,6 @@ do_rollback_prev() {
   fi
   cp -a "${INSTALL_DIR}/we1bboard.prev" "${INSTALL_DIR}/we1bboard"
   chmod +x "${INSTALL_DIR}/we1bboard"
-  ln -sf "${INSTALL_DIR}/we1bboard" "${BIN_PATH}"
   systemctl start "${APP_NAME}"
   log "Rolled back to previous binary: $(current_version)"
 }

@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/we1bboard/we1bboard/internal/database"
@@ -101,7 +102,7 @@ func (s *ClientService) Create(c *model.Client) error {
 		c.UUID = uuid.NewString()
 	}
 	if c.SubID == "" {
-		c.SubID = uuid.NewString()[:8]
+		c.SubID = strings.ReplaceAll(uuid.NewString(), "-", "")
 	}
 	if c.Email == "" {
 		c.Email = c.UUID[:8] + "@we1b"

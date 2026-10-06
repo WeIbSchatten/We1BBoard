@@ -1,10 +1,10 @@
 package controller
 
 import (
-	"crypto/subtle"
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
@@ -16,7 +16,9 @@ import (
 	"github.com/we1bboard/we1bboard/internal/database"
 	"github.com/we1bboard/we1bboard/internal/database/model"
 	"github.com/we1bboard/we1bboard/internal/protocol"
+	"github.com/we1bboard/we1bboard/internal/security"
 	"github.com/we1bboard/we1bboard/internal/tgproxy"
+	"github.com/we1bboard/we1bboard/internal/web/middleware"
 	"github.com/we1bboard/we1bboard/internal/web/runtime"
 	"github.com/we1bboard/we1bboard/internal/web/service"
 	"github.com/we1bboard/we1bboard/internal/xray"
@@ -53,6 +55,10 @@ func (a *API) Login(c *gin.Context) {
 		fail(c, 400, err)
 		return
 	}
+	if !middleware.LoginUserLimit(req.Username) {
+		fail(c, 429, fmt.Errorf("too many login attempts, try later"))
+		return
+	}
 	u, err := a.Auth.Login(req.Username, req.Password)
 	if err != nil {
 		// uniform message — no user enumeration
@@ -66,7 +72,7 @@ func (a *API) Login(c *gin.Context) {
 		HttpOnly: true,
 		MaxAge:   7 * 24 * 3600,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https",
+		Secure:   c.Request.TLS != nil || (config.Env("WE1B_TRUST_PROXY", "") == "1" && c.GetHeader("X-Forwarded-Proto") == "https"),
 	})
 	sess.Set("uid", u.ID)
 	sess.Set("username", u.Username)
@@ -92,7 +98,7 @@ func (a *API) RequireAuth() gin.HandlerFunc {
 		if len(auth) > 7 && auth[:7] == "Bearer " {
 			token := auth[7:]
 			expected := database.GetSetting("nodeToken")
-			if expected != "" && subtle.ConstantTimeCompare([]byte(token), []byte(expected)) == 1 {
+			if security.EqualSecret(token, expected) {
 				c.Set("authMode", "node")
 				c.Next()
 				return
@@ -106,6 +112,17 @@ func (a *API) RequireAuth() gin.HandlerFunc {
 			return
 		}
 		c.Set("authMode", "session")
+		c.Next()
+	}
+}
+
+// RequireSession blocks node-token callers from admin-only endpoints (password, settings, …).
+func (a *API) RequireSession() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.GetString("authMode") != "session" {
+			c.AbortWithStatusJSON(403, gin.H{"success": false, "error": "session required"})
+			return
+		}
 		c.Next()
 	}
 }
@@ -208,7 +225,12 @@ func (a *API) DeleteClient(c *gin.Context) {
 
 func (a *API) ClientLink(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
-	link, err := a.Client.ShareLink(uint(id), c.Query("host"))
+	host := c.Query("host")
+	if host != "" && !security.ValidShareHost(host) {
+		fail(c, 400, fmt.Errorf("invalid host"))
+		return
+	}
+	link, err := a.Client.ShareLink(uint(id), host)
 	if err != nil {
 		fail(c, 400, err)
 		return
@@ -218,7 +240,12 @@ func (a *API) ClientLink(c *gin.Context) {
 
 func (a *API) ClientQR(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
-	link, err := a.Client.ShareLink(uint(id), c.Query("host"))
+	host := c.Query("host")
+	if host != "" && !security.ValidShareHost(host) {
+		fail(c, 400, fmt.Errorf("invalid host"))
+		return
+	}
+	link, err := a.Client.ShareLink(uint(id), host)
 	if err != nil {
 		fail(c, 400, err)
 		return
@@ -228,6 +255,7 @@ func (a *API) ClientQR(c *gin.Context) {
 		fail(c, 500, err)
 		return
 	}
+	c.Header("Cache-Control", "no-store")
 	c.Data(http.StatusOK, "image/png", png)
 }
 
@@ -351,7 +379,26 @@ func (a *API) ListNodes(c *gin.Context) {
 		fail(c, 500, err)
 		return
 	}
-	ok(c, rows)
+	type nodeDTO struct {
+		ID       uint   `json:"id"`
+		Name     string `json:"name"`
+		URL      string `json:"url"`
+		Token    string `json:"token"`
+		TLSMode  string `json:"tlsMode"`
+		Region   string `json:"region"`
+		Enable   bool   `json:"enable"`
+		Online   bool   `json:"online"`
+		LastSeen int64  `json:"lastSeen"`
+	}
+	out := make([]nodeDTO, 0, len(rows))
+	for _, n := range rows {
+		out = append(out, nodeDTO{
+			ID: n.ID, Name: n.Name, URL: n.URL, Token: security.MaskSecret(n.Token),
+			TLSMode: n.TLSMode, Region: n.Region, Enable: n.Enable,
+			Online: n.Online, LastSeen: n.LastSeen,
+		})
+	}
+	ok(c, out)
 }
 
 func (a *API) CreateNode(c *gin.Context) {
@@ -360,10 +407,15 @@ func (a *API) CreateNode(c *gin.Context) {
 		fail(c, 400, err)
 		return
 	}
+	if err := security.ValidateNodeURL(n.URL); err != nil {
+		fail(c, 400, err)
+		return
+	}
 	if err := a.Node.Create(&n); err != nil {
 		fail(c, 400, err)
 		return
 	}
+	// one-time full token for initial provisioning
 	ok(c, n)
 }
 
@@ -375,10 +427,22 @@ func (a *API) UpdateNode(c *gin.Context) {
 		return
 	}
 	n.ID = uint(id)
+	if err := security.ValidateNodeURL(n.URL); err != nil {
+		fail(c, 400, err)
+		return
+	}
+	// empty token in update means "keep existing" when UI sent masked value
+	if strings.Contains(n.Token, "…") || n.Token == "***" || n.Token == "" {
+		var old model.Node
+		if err := database.DB.First(&old, n.ID).Error; err == nil {
+			n.Token = old.Token
+		}
+	}
 	if err := a.Node.Update(&n); err != nil {
 		fail(c, 400, err)
 		return
 	}
+	n.Token = security.MaskSecret(n.Token)
 	ok(c, n)
 }
 
@@ -553,8 +617,8 @@ func (a *API) DeleteRouting(c *gin.Context) {
 
 func (a *API) ChangePassword(c *gin.Context) {
 	var req struct {
-		OldPassword string `json:"oldPassword"`
-		NewPassword string `json:"newPassword"`
+		OldPassword string `json:"oldPassword" binding:"required"`
+		NewPassword string `json:"newPassword" binding:"required,min=8,max=128"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, 400, err)
@@ -562,6 +626,10 @@ func (a *API) ChangePassword(c *gin.Context) {
 	}
 	sess := sessions.Default(c)
 	username, _ := sess.Get("username").(string)
+	if username == "" {
+		fail(c, 401, fmt.Errorf("unauthorized"))
+		return
+	}
 	if err := a.Auth.ChangePassword(username, req.OldPassword, req.NewPassword); err != nil {
 		fail(c, 400, err)
 		return

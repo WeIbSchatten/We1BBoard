@@ -46,6 +46,7 @@ func NewServer(cfg *config.Config, xrayMgr *xray.Manager, extraMgr *extra.Manage
 func (s *Server) Start() error {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
+	middleware.TrustProxy(r)
 	r.Use(gin.Recovery(), gin.Logger(), securityHeaders(), middleware.MaxBodyBytes(2<<20))
 
 	secret := database.GetSetting("secret")
@@ -60,6 +61,7 @@ func (s *Server) Start() error {
 		SameSite: http.SameSiteLaxMode,
 	})
 	r.Use(sessions.Sessions("we1b", store))
+	r.Use(middleware.CSRFOriginCheck())
 
 	api := &controller.API{
 		Auth:     &service.AuthService{},
@@ -94,56 +96,63 @@ func (s *Server) Start() error {
 	auth := r.Group(panelPath + "api")
 	auth.Use(api.RequireAuth())
 	{
-		auth.POST("/logout", api.Logout)
-		auth.GET("/me", api.Me)
-		auth.POST("/password", api.ChangePassword)
-		auth.GET("/protocols", api.ListProtocols)
-
-		auth.GET("/inbounds", api.ListInbounds)
-		auth.POST("/inbounds", api.CreateInbound)
-		auth.PUT("/inbounds/:id", api.UpdateInbound)
-		auth.DELETE("/inbounds/:id", api.DeleteInbound)
-
-		auth.POST("/clients", api.CreateClient)
-		auth.PUT("/clients/:id", api.UpdateClient)
-		auth.DELETE("/clients/:id", api.DeleteClient)
-		auth.GET("/clients/:id/link", api.ClientLink)
-		auth.GET("/clients/:id/qr", api.ClientQR)
-
-		auth.GET("/outbounds", api.ListOutbounds)
-		auth.POST("/outbounds", api.CreateOutbound)
-		auth.PUT("/outbounds/:id", api.UpdateOutbound)
-		auth.DELETE("/outbounds/:id", api.DeleteOutbound)
-
-		auth.GET("/nodes", api.ListNodes)
-		auth.POST("/nodes", api.CreateNode)
-		auth.PUT("/nodes/:id", api.UpdateNode)
-		auth.DELETE("/nodes/:id", api.DeleteNode)
-		auth.POST("/nodes/ping", api.PingNodes)
-
-		auth.GET("/bridges", api.ListBridges)
-		auth.POST("/bridges", api.CreateBridge)
-		auth.PUT("/bridges/:id", api.UpdateBridge)
-		auth.DELETE("/bridges/:id", api.DeleteBridge)
-		auth.GET("/bridges/:id/hint", api.BridgeHint)
-
-		auth.GET("/tgproxy", api.ListTgProxy)
-		auth.POST("/tgproxy", api.CreateTgProxy)
-		auth.PUT("/tgproxy/:id", api.UpdateTgProxy)
-		auth.DELETE("/tgproxy/:id", api.DeleteTgProxy)
-		auth.POST("/tgproxy/:id/start", api.StartTgProxy)
-		auth.POST("/tgproxy/:id/stop", api.StopTgProxy)
-
-		auth.GET("/routing", api.ListRouting)
-		auth.POST("/routing", api.CreateRouting)
-		auth.DELETE("/routing/:id", api.DeleteRouting)
-
-		auth.GET("/settings", api.GetSettings)
-		auth.POST("/settings", api.UpdateSettings)
-
+		// Node token may only hit these (remote master heartbeat / reload)
 		auth.GET("/server/status", api.ServerStatus)
-		auth.GET("/xray/config", api.XrayConfig)
 		auth.POST("/xray/restart", api.XrayRestart)
+
+		// Everything else requires interactive admin session
+		sess := auth.Group("")
+		sess.Use(api.RequireSession())
+		{
+			sess.POST("/logout", api.Logout)
+			sess.GET("/me", api.Me)
+			sess.POST("/password", api.ChangePassword)
+			sess.GET("/protocols", api.ListProtocols)
+
+			sess.GET("/inbounds", api.ListInbounds)
+			sess.POST("/inbounds", api.CreateInbound)
+			sess.PUT("/inbounds/:id", api.UpdateInbound)
+			sess.DELETE("/inbounds/:id", api.DeleteInbound)
+
+			sess.POST("/clients", api.CreateClient)
+			sess.PUT("/clients/:id", api.UpdateClient)
+			sess.DELETE("/clients/:id", api.DeleteClient)
+			sess.GET("/clients/:id/link", api.ClientLink)
+			sess.GET("/clients/:id/qr", api.ClientQR)
+
+			sess.GET("/outbounds", api.ListOutbounds)
+			sess.POST("/outbounds", api.CreateOutbound)
+			sess.PUT("/outbounds/:id", api.UpdateOutbound)
+			sess.DELETE("/outbounds/:id", api.DeleteOutbound)
+
+			sess.GET("/nodes", api.ListNodes)
+			sess.POST("/nodes", api.CreateNode)
+			sess.PUT("/nodes/:id", api.UpdateNode)
+			sess.DELETE("/nodes/:id", api.DeleteNode)
+			sess.POST("/nodes/ping", api.PingNodes)
+
+			sess.GET("/bridges", api.ListBridges)
+			sess.POST("/bridges", api.CreateBridge)
+			sess.PUT("/bridges/:id", api.UpdateBridge)
+			sess.DELETE("/bridges/:id", api.DeleteBridge)
+			sess.GET("/bridges/:id/hint", api.BridgeHint)
+
+			sess.GET("/tgproxy", api.ListTgProxy)
+			sess.POST("/tgproxy", api.CreateTgProxy)
+			sess.PUT("/tgproxy/:id", api.UpdateTgProxy)
+			sess.DELETE("/tgproxy/:id", api.DeleteTgProxy)
+			sess.POST("/tgproxy/:id/start", api.StartTgProxy)
+			sess.POST("/tgproxy/:id/stop", api.StopTgProxy)
+
+			sess.GET("/routing", api.ListRouting)
+			sess.POST("/routing", api.CreateRouting)
+			sess.DELETE("/routing/:id", api.DeleteRouting)
+
+			sess.GET("/settings", api.GetSettings)
+			sess.POST("/settings", api.UpdateSettings)
+
+			sess.GET("/xray/config", api.XrayConfig)
+		}
 	}
 
 	// Remote-node compatibility alias (safe path join, no ..)

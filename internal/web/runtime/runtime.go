@@ -2,17 +2,18 @@ package runtime
 
 import (
 	"bytes"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/we1bboard/we1bboard/internal/database"
 	"github.com/we1bboard/we1bboard/internal/database/model"
 	"github.com/we1bboard/we1bboard/internal/extra"
+	"github.com/we1bboard/we1bboard/internal/security"
 	"github.com/we1bboard/we1bboard/internal/tgproxy"
 	"github.com/we1bboard/we1bboard/internal/xray"
 )
@@ -38,7 +39,6 @@ func (l *Local) Reload() error {
 			first = err
 		}
 		if _, err := os.Stat(l.Xray.Bin); err != nil {
-			// Config written; binary optional until installed
 			if l.Extra != nil {
 				_ = l.Extra.SyncAll()
 			}
@@ -67,8 +67,7 @@ type Remote struct {
 func (r *Remote) Kind() string { return "remote" }
 
 func (r *Remote) client() *http.Client {
-	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: r.Node.TLSMode == "skip"}}
-	return &http.Client{Timeout: 15 * time.Second, Transport: tr}
+	return security.SafeHTTPClient(r.Node.TLSMode == "skip", 15*time.Second)
 }
 
 func (r *Remote) Reload() error {
@@ -76,12 +75,15 @@ func (r *Remote) Reload() error {
 }
 
 func (r *Remote) post(path string, body any) error {
+	if err := security.ValidateNodeURL(r.Node.URL); err != nil {
+		return err
+	}
 	var buf io.Reader
 	if body != nil {
 		b, _ := json.Marshal(body)
 		buf = bytes.NewReader(b)
 	}
-	url := r.Node.URL + path
+	url := strings.TrimRight(r.Node.URL, "/") + path
 	req, err := http.NewRequest(http.MethodPost, url, buf)
 	if err != nil {
 		return err
@@ -101,7 +103,10 @@ func (r *Remote) post(path string, body any) error {
 }
 
 func (r *Remote) Heartbeat() error {
-	req, err := http.NewRequest(http.MethodGet, r.Node.URL+"/panel/api/server/status", nil)
+	if err := security.ValidateNodeURL(r.Node.URL); err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodGet, strings.TrimRight(r.Node.URL, "/")+"/panel/api/server/status", nil)
 	if err != nil {
 		return err
 	}
@@ -111,6 +116,9 @@ func (r *Remote) Heartbeat() error {
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("remote status %s", resp.Status)
+	}
 	return nil
 }
 

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # We1BBoard control menu (analog of x-ui.sh)
-# Installed as /usr/bin/we1bboard-ctl
+# Installed as /usr/bin/we1bboard  (we1bboard-ctl is a symlink)
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -58,19 +58,20 @@ rollback() {
 
 update_ctl_script() {
   need_root
-  curl -fsSL "${RAW_BASE}/scripts/we1bboard.sh" -o /usr/bin/we1bboard-ctl
-  chmod +x /usr/bin/we1bboard-ctl
-  log "Control script updated. Re-run: we1bboard-ctl"
+  curl -fsSL "${RAW_BASE}/scripts/we1bboard.sh" -o /usr/bin/we1bboard
+  chmod +x /usr/bin/we1bboard
+  ln -sf /usr/bin/we1bboard /usr/bin/we1bboard-ctl
+  log "Control script updated. Re-run: we1bboard"
 }
 
 ssl_setup() {
   need_root
-  bash <(curl -fsSL "${RAW_BASE}/scripts/install.sh") ssl
+  bash <(curl -fsSL "${RAW_BASE}/install.sh") ssl
 }
 
 reinstall() {
   need_root
-  bash <(curl -fsSL "${RAW_BASE}/scripts/install.sh") install
+  bash <(curl -fsSL "${RAW_BASE}/install.sh")
 }
 
 uninstall() {
@@ -78,7 +79,7 @@ uninstall() {
   read -r -p "Uninstall panel binary/service? Data in ${DATA_DIR} kept. [y/N]: " y
   [[ "${y}" == "y" || "${y}" == "Y" ]] || return 0
   systemctl disable --now "${APP_NAME}" 2>/dev/null || true
-  rm -f /etc/systemd/system/${APP_NAME}.service /usr/local/bin/${APP_NAME} /usr/bin/we1bboard-ctl /usr/bin/we1bboard-menu
+  rm -f /etc/systemd/system/${APP_NAME}.service /usr/local/bin/${APP_NAME} /usr/bin/we1bboard /usr/bin/we1bboard-ctl /usr/bin/we1bboard-menu
   rm -rf "${INSTALL_DIR}"
   systemctl daemon-reload
   log "Uninstalled (data kept at ${DATA_DIR})"
@@ -134,9 +135,10 @@ case "${1:-}" in
   ssl) ssl_setup ;;
   update-ctl) update_ctl_script ;;
   uninstall) uninstall ;;
+  install) reinstall ;;
   menu|"") menu ;;
   *)
-    echo "Usage: we1bboard-ctl {menu|start|stop|restart|status|update|legacy|rollback|ssl|update-ctl|uninstall}"
+    echo "Usage: we1bboard {menu|start|stop|restart|status|update|legacy|rollback|ssl|install|update-ctl|uninstall}"
     exit 1
     ;;
 esac
