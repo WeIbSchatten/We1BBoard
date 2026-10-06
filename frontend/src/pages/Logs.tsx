@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
 import { useApp } from '../AppContext'
 
@@ -11,11 +11,19 @@ type ConfigIssue = { tag: string; reason: string }
 
 const LINE_OPTS = [50, 100, 200, 500] as const
 
+function lineLevelClass(line: string): string {
+  const u = line.toUpperCase()
+  if (/\bERROR\b|\bFATAL\b|\bCRITICAL\b/.test(u)) return 'log-error'
+  if (/\bWARN(ING)?\b/.test(u)) return 'log-warn'
+  if (/\bINFO\b|\bDEBUG\b/.test(u)) return 'log-info'
+  return ''
+}
+
 export function LogsPage() {
   const { tr } = useApp()
   const [tab, setTab] = useState<Tab>('error')
   const [lines, setLines] = useState<number>(200)
-  const [text, setText] = useState('')
+  const [logLines, setLogLines] = useState<string[]>([])
   const [path, setPath] = useState('')
   const [configJson, setConfigJson] = useState('')
   const [issues, setIssues] = useState<ConfigIssue[]>([])
@@ -49,7 +57,7 @@ export function LogsPage() {
         ? `/logs/panel?lines=${lines}`
         : `/xray/logs?source=${tab}&lines=${lines}`
       const data = await api<LogsResp>(url)
-      setText((data.lines || []).join('\n'))
+      setLogLines(data.lines || [])
       setPath(data.path || '')
       await loadIssues()
     } catch (e) {
@@ -114,6 +122,26 @@ export function LogsPage() {
     }
   }
 
+  function downloadLogs() {
+    const body = tab === 'config' ? configJson : logLines.join('\n')
+    const blob = new Blob([body], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = tab === 'config' ? 'xray-config.json' : `we1b-${tab}.log`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const colorize = tab === 'error' || tab === 'panel' || tab === 'process'
+
+  const renderedLines = useMemo(() => {
+    if (!colorize) return null
+    return logLines.map((line, i) => (
+      <div key={i} className={lineLevelClass(line)}>{line || ' '}</div>
+    ))
+  }, [logLines, colorize])
+
   const tabs: { id: Tab; label: string }[] = [
     { id: 'error', label: 'error' },
     { id: 'access', label: 'access' },
@@ -133,7 +161,7 @@ export function LogsPage() {
           <span className={`badge ${running ? 'on' : 'off'}`}>
             {running ? tr('running') : tr('stopped')}
           </span>
-          <button className="btn secondary" type="button" onClick={() => void disableInvalid()}>
+          <button className="btn secondary" type="button" onClick={() => { void disableInvalid() }}>
             {tr('disableInvalidInbounds')}
           </button>
           <button className="btn secondary" type="button" onClick={() => void restart()}>{tr('restart')}</button>
@@ -175,6 +203,9 @@ export function LogsPage() {
           <button className="btn secondary" type="button" disabled={busy} onClick={() => void loadLogs()}>
             {tr('refresh')}
           </button>
+          <button className="btn secondary" type="button" onClick={downloadLogs}>
+            {tr('download')}
+          </button>
           <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
             <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} />
             {tr('autoRefresh')} (5s)
@@ -194,10 +225,19 @@ export function LogsPage() {
           <button className="btn secondary" type="button" disabled={busy} onClick={() => void loadConfig()}>
             {tr('refresh')}
           </button>
+          <button className="btn secondary" type="button" onClick={downloadLogs}>
+            {tr('download')}
+          </button>
         </div>
       )}
 
-      <pre className="log-view">{tab === 'config' ? configJson : text}</pre>
+      {tab === 'config' ? (
+        <pre className="log-view">{configJson}</pre>
+      ) : colorize ? (
+        <div className="log-view log-view-colored">{renderedLines}</div>
+      ) : (
+        <pre className="log-view">{logLines.join('\n')}</pre>
+      )}
       {msg && <p className="page-sub" style={{ marginTop: 10 }}>{msg}</p>}
 
       <style>{`
@@ -231,6 +271,11 @@ export function LogsPage() {
           white-space: pre-wrap;
           word-break: break-word;
         }
+        .log-view-colored { white-space: pre; }
+        .log-view-colored > div { white-space: pre-wrap; word-break: break-word; }
+        .log-error { color: var(--danger); }
+        .log-warn { color: var(--warn); }
+        .log-info { color: var(--accent); }
       `}</style>
     </div>
   )

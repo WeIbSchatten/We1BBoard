@@ -18,6 +18,7 @@ import (
 	"github.com/we1bboard/we1bboard/internal/sub"
 	"github.com/we1bboard/we1bboard/internal/tgproxy"
 	"github.com/we1bboard/we1bboard/internal/web/controller"
+	"github.com/we1bboard/we1bboard/internal/web/history"
 	"github.com/we1bboard/we1bboard/internal/web/middleware"
 	"github.com/we1bboard/we1bboard/internal/web/runtime"
 	"github.com/we1bboard/we1bboard/internal/web/service"
@@ -47,7 +48,7 @@ func (s *Server) Start() error {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	middleware.TrustProxy(r)
-	r.Use(gin.Recovery(), gin.Logger(), securityHeaders(), middleware.MaxBodyBytes(2<<20))
+	r.Use(gin.Recovery(), gin.Logger(), securityHeaders(), middleware.MaxBodyBytes(64<<20))
 
 	secret := database.GetSetting("secret")
 	if len(secret) < 32 {
@@ -63,10 +64,13 @@ func (s *Server) Start() error {
 	r.Use(sessions.Sessions("we1b", store))
 	r.Use(middleware.CSRFOriginCheck())
 
+	history.Start()
+
 	api := &controller.API{
 		Auth:     &service.AuthService{},
 		Inbound:  &service.InboundService{RT: s.RT},
 		Client:   &service.ClientService{RT: s.RT},
+		Host:     &service.HostService{},
 		Outbound: &service.OutboundService{RT: s.RT},
 		Node:     &service.NodeService{},
 		Routing:  &service.RoutingService{RT: s.RT},
@@ -114,7 +118,18 @@ func (s *Server) Start() error {
 			sess.GET("/tools/uuid", api.RandomUUID)
 			sess.POST("/tools/fetch-sub", api.FetchSub)
 
+			sess.GET("/server/history", api.ServerHistory)
+			sess.GET("/server/backup", api.BackupDB)
+			sess.POST("/server/restore", api.RestoreDB)
+			sess.GET("/server/update-info", api.UpdateInfo)
+			sess.POST("/server/update", api.PanelUpdate)
+			sess.GET("/server/geodata-status", api.GeodataStatus)
+			sess.POST("/server/update-geodata", api.UpdateGeodata)
+			sess.GET("/server/xray-version", api.XrayVersion)
+			sess.POST("/server/install-xray", api.InstallXray)
+
 			sess.GET("/inbounds", api.ListInbounds)
+			sess.GET("/inbounds/rates", api.InboundRates)
 			sess.POST("/inbounds", api.CreateInbound)
 			sess.PUT("/inbounds/:id", api.UpdateInbound)
 			sess.DELETE("/inbounds/:id", api.DeleteInbound)
@@ -124,18 +139,40 @@ func (s *Server) Start() error {
 			sess.POST("/clients", api.CreateClient)
 			sess.POST("/clients/bulk-adjust", api.BulkAdjustClients)
 			sess.POST("/clients/bulk-attach", api.BulkAttachClients)
+			sess.GET("/clients/groups", api.ListClientGroups)
+			sess.POST("/clients/groups", api.CreateClientGroup)
+			sess.POST("/clients/groups/rename", api.RenameClientGroup)
+			sess.DELETE("/clients/groups/:name", api.DeleteClientGroup)
+			sess.POST("/clients/groups/assign", api.AssignClientGroup)
+			sess.POST("/clients/groups/unassign", api.UnassignClientGroup)
+			sess.POST("/clients/groups/reset-traffic", api.ResetClientGroupTraffic)
 			sess.PUT("/clients/:id", api.UpdateClient)
 			sess.DELETE("/clients/:id", api.DeleteClient)
 			sess.POST("/clients/:id/reset-traffic", api.ResetClientTraffic)
 			sess.GET("/clients/:id/link", api.ClientLink)
+			sess.GET("/clients/:id/links", api.ClientLinks)
 			sess.GET("/clients/:id/qr", api.ClientQR)
 			sess.GET("/clients/:id/sub", api.ClientSub)
 			sess.GET("/subscription", api.SubscriptionInfo)
 
+			sess.GET("/hosts", api.ListHosts)
+			sess.POST("/hosts", api.CreateHost)
+			sess.PUT("/hosts/:id", api.UpdateHost)
+			sess.DELETE("/hosts/:id", api.DeleteHost)
+			sess.POST("/hosts/:id/enable", api.EnableHost)
+
 			sess.GET("/outbounds", api.ListOutbounds)
 			sess.POST("/outbounds", api.CreateOutbound)
+			sess.POST("/outbounds/test-all", api.TestAllOutbounds)
 			sess.PUT("/outbounds/:id", api.UpdateOutbound)
 			sess.DELETE("/outbounds/:id", api.DeleteOutbound)
+			sess.POST("/outbounds/:id/test", api.TestOutbound)
+
+			sess.GET("/outbound-subs", api.ListOutboundSubs)
+			sess.POST("/outbound-subs", api.CreateOutboundSub)
+			sess.PUT("/outbound-subs/:id", api.UpdateOutboundSub)
+			sess.DELETE("/outbound-subs/:id", api.DeleteOutboundSub)
+			sess.POST("/outbound-subs/:id/refresh", api.RefreshOutboundSub)
 
 			sess.GET("/nodes", api.ListNodes)
 			sess.POST("/nodes", api.CreateNode)
@@ -165,6 +202,10 @@ func (s *Server) Start() error {
 
 			sess.GET("/settings", api.GetSettings)
 			sess.POST("/settings", api.UpdateSettings)
+			sess.GET("/settings/2fa/setup", api.Setup2FA)
+			sess.POST("/settings/2fa/enable", api.Enable2FA)
+			sess.POST("/settings/2fa/disable", api.Disable2FA)
+			sess.POST("/settings/tg-test", api.TestTelegram)
 
 			sess.GET("/xray/config", api.XrayConfig)
 			sess.GET("/xray/config-issues", api.XrayConfigIssues)
@@ -174,6 +215,7 @@ func (s *Server) Start() error {
 			sess.POST("/xray/template", api.SetXrayTemplate)
 			sess.GET("/xray/template/default", api.GetXrayTemplateDefault)
 			sess.POST("/xray/route-test", api.XrayRouteTest)
+			sess.POST("/xray/warp/generate", api.WarpGenerate)
 		}
 	}
 

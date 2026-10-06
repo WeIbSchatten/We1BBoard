@@ -17,6 +17,7 @@ import (
 	"github.com/we1bboard/we1bboard/internal/tgproxy"
 	"github.com/we1bboard/we1bboard/internal/ufw"
 	"github.com/we1bboard/we1bboard/internal/web"
+	"github.com/we1bboard/we1bboard/internal/web/controller"
 	"github.com/we1bboard/we1bboard/internal/web/job"
 	"github.com/we1bboard/we1bboard/internal/web/service"
 	"github.com/we1bboard/we1bboard/internal/xray"
@@ -80,6 +81,9 @@ func runServer() {
 
 	srv := web.NewServer(cfg, xrayMgr, extraMgr, tgMgr)
 	job.Start(srv.RT)
+	// Outbound subscription auto-refresh needs the API helpers; build a lightweight handle.
+	apiForJobs := &controller.API{RT: srv.RT, Cfg: cfg, Xray: xrayMgr}
+	job.StartOutboundSubRefresh(apiForJobs)
 	go func() {
 		ufw.SyncAllInbounds()
 	}()

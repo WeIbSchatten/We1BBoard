@@ -502,17 +502,22 @@ func (s *ClientService) BulkAttach(ids []uint, inboundIDs []uint) (int, error) {
 }
 
 func (s *ClientService) ShareLink(id uint, host string) (string, error) {
+	links, err := s.ShareLinks(id, host)
+	if err != nil {
+		return "", err
+	}
+	return strings.Join(links, "\n"), nil
+}
+
+// ShareLinks returns one link per subscription host (or a single default link).
+func (s *ClientService) ShareLinks(id uint, host string) ([]string, error) {
 	var c model.Client
 	if err := database.DB.First(&c, id).Error; err != nil {
-		return "", err
+		return nil, err
 	}
 	var in model.Inbound
 	if err := database.DB.First(&in, c.InboundID).Error; err != nil {
-		return "", err
-	}
-	adap, err := protocol.Get(in.Protocol)
-	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if host == "" {
 		host = database.GetSetting("subHost")
@@ -520,7 +525,7 @@ func (s *ClientService) ShareLink(id uint, host string) (string, error) {
 			host = "127.0.0.1"
 		}
 	}
-	return adap.ShareLink(&in, c, host)
+	return BuildShareLinks(&in, c, host)
 }
 
 type AuthService struct{}

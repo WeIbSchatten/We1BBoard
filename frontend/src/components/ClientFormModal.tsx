@@ -10,6 +10,7 @@ type Props = {
   inbound: Inbound | null
   inbounds?: Inbound[]
   client: Client | null
+  groupNames?: string[]
   onClose: () => void
   onSaved: () => void
 }
@@ -30,7 +31,7 @@ function parseSelectedIds(client: Client | null, fallback: number): number[] {
   return []
 }
 
-export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose, onSaved }: Props) {
+export function ClientFormModal({ open, mode, inbound, inbounds, client, groupNames, onClose, onSaved }: Props) {
   const { tr } = useApp()
   const [tab, setTab] = useState<Tab>('basic')
   const [selectedInboundIds, setSelectedInboundIds] = useState<number[]>([])
@@ -38,6 +39,7 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
   const [uuid, setUuid] = useState('')
   const [password, setPassword] = useState('')
   const [subId, setSubId] = useState('')
+  const [group, setGroup] = useState('')
   const [flow, setFlow] = useState('')
   const [enable, setEnable] = useState(true)
   const [totalGB, setTotalGB] = useState(0)
@@ -69,6 +71,7 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
       setUuid(client.uuid)
       setPassword(client.password || '')
       setSubId(client.subId || '')
+      setGroup(client.group || '')
       setFlow(client.flow || '')
       setEnable(client.enable)
       setTotalGB(client.totalGB || 0)
@@ -87,6 +90,7 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
       setUuid(randomUUID())
       setPassword(randomLowerAndNum(16))
       setSubId(randomLowerAndNum(16))
+      setGroup('')
       setEnable(true)
       setTotalGB(0)
       setLimitIp(0)
@@ -138,6 +142,7 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
         uuid: uuid || undefined,
         password: password || undefined,
         subId: subId || undefined,
+        group: group.trim(),
         flow,
         enable,
         totalGB,
@@ -235,6 +240,21 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, onClose
             <div className="field">
               <label className="label">Comment</label>
               <input className="input" value={comment} onChange={(e) => setComment(e.target.value)} />
+            </div>
+            <div className="field">
+              <label className="label">{tr('group')}</label>
+              <input
+                className="input"
+                list="client-group-names"
+                value={group}
+                onChange={(e) => setGroup(e.target.value)}
+                placeholder={tr('groupName')}
+              />
+              <datalist id="client-group-names">
+                {(groupNames || []).map((g) => (
+                  <option key={g} value={g} />
+                ))}
+              </datalist>
             </div>
             <div className="field">
               <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

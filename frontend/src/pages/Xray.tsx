@@ -1,8 +1,8 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
-import { api, type Outbound } from '../api'
+import { api, type GeodataStatus, type Outbound } from '../api'
 import { useApp } from '../AppContext'
 
-type Tab = 'basics' | 'dns' | 'balancers' | 'advanced' | 'routeTest'
+type Tab = 'basics' | 'dns' | 'balancers' | 'advanced' | 'routeTest' | 'geodata'
 
 type Balancer = {
   tag: string
@@ -52,6 +52,12 @@ const DNS_SAMPLE = `{
   "queryStrategy": "UseIPv4"
 }`
 
+const DNS_PRESETS: { id: string; label: string; servers: unknown[] }[] = [
+  { id: 'cloudflare', label: 'Cloudflare 1.1.1.1', servers: ['1.1.1.1', '1.0.0.1'] },
+  { id: 'google', label: 'Google 8.8.8.8', servers: ['8.8.8.8', '8.8.4.4'] },
+  { id: 'adguard', label: 'AdGuard', servers: ['dns.adguard-dns.com'] },
+]
+
 function csvToList(s: string): string[] {
   return s.split(',').map((x) => x.trim()).filter(Boolean)
 }
@@ -88,6 +94,9 @@ export function XrayPage() {
     inboundTag: '', domain: '', ip: '', port: '', network: '', protocol: '', user: '',
   })
   const [testResult, setTestResult] = useState<RouteTestResult | null>(null)
+  const [geoStatus, setGeoStatus] = useState<GeodataStatus | null>(null)
+  const [geoURLs, setGeoURLs] = useState({ geosite: '', geoip: '' })
+  const [xrayVer, setXrayVer] = useState<{ current: string; bin: string } | null>(null)
 
   const load = useCallback(async () => {
     const [t, obs] = await Promise.all([
@@ -97,6 +106,20 @@ export function XrayPage() {
     setTpl(t)
     setOutbounds(obs || [])
     applyTemplateToForms(t)
+  }, [])
+
+  const loadXrayVersion = useCallback(async () => {
+    try {
+      setXrayVer(await api<{ current: string; bin: string }>('/server/xray-version'))
+    } catch {
+      setXrayVer(null)
+    }
+  }, [])
+
+  const loadGeodata = useCallback(async () => {
+    const st = await api<GeodataStatus>('/server/geodata-status')
+    setGeoStatus(st)
+    setGeoURLs({ geosite: st.geositeURL || '', geoip: st.geoipURL || '' })
   }, [])
 
   function applyTemplateToForms(t: XrayTemplate) {
@@ -119,6 +142,12 @@ export function XrayPage() {
   }
 
   useEffect(() => { load().catch(console.error) }, [load])
+  useEffect(() => {
+    if (tab === 'basics') loadXrayVersion().catch(() => {})
+  }, [tab, loadXrayVersion])
+  useEffect(() => {
+    if (tab === 'geodata') loadGeodata().catch(console.error)
+  }, [tab, loadGeodata])
 
   const balancers = useMemo(() => tpl?.routing?.balancers || [], [tpl])
 
@@ -173,6 +202,36 @@ export function XrayPage() {
     if (dns === undefined) delete next.dns
     else next.dns = dns
     await saveTemplate(next)
+  }
+
+  async function applyDnsPreset(servers: unknown[]) {
+    if (!tpl) return
+    const prev = (typeof tpl.dns === 'object' && tpl.dns && !Array.isArray(tpl.dns))
+      ? { ...(tpl.dns as Record<string, unknown>) }
+      : {}
+    const dns = { ...prev, servers }
+    const text = JSON.stringify(dns, null, 2)
+    setDnsText(text)
+    const next: XrayTemplate = { ...tpl, dns }
+    await saveTemplate(next)
+  }
+
+  async function installXray() {
+    if (!confirm(tr('installXrayConfirm'))) return
+    setBusy(true)
+    setMsg('')
+    try {
+      const r = await api<{ current?: string; version?: string; message?: string }>('/server/install-xray', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      })
+      setMsg(r.message || `OK ${r.current || r.version || ''}`)
+      await loadXrayVersion()
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'error')
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function saveBalancersAndObs(nextBalancers: Balancer[]) {
@@ -233,6 +292,82 @@ export function XrayPage() {
     }
   }
 
+  async function saveGeoURLs() {
+    setBusy(true)
+    setMsg('')
+    try {
+      await api('/settings', {
+        method: 'POST',
+        body: JSON.stringify({
+          geodataGeositeURL: geoURLs.geosite,
+          geodataGeoipURL: geoURLs.geoip,
+        }),
+      })
+      await loadGeodata()
+      setMsg('OK')
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function updateGeodata() {
+    setBusy(true)
+    setMsg('')
+    try {
+      await api('/server/update-geodata', { method: 'POST' })
+      await loadGeodata()
+      setMsg(tr('geodataUpdated'))
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function addWarpPlaceholder() {
+    setBusy(true)
+    setMsg('')
+    try {
+      const data = await api<{
+        outbound: { tag: string; remark: string; settings: string }
+        note: string
+      }>('/xray/warp/generate', { method: 'POST' })
+      let tag = data.outbound.tag || 'warp'
+      const existing = new Set(outbounds.map((o) => o.tag))
+      if (existing.has(tag)) {
+        let i = 2
+        while (existing.has(`${tag}-${i}`)) i++
+        tag = `${tag}-${i}`
+      }
+      await api('/outbounds', {
+        method: 'POST',
+        body: JSON.stringify({
+          tag,
+          protocol: 'wireguard',
+          enable: true,
+          remark: data.outbound.remark || 'Cloudflare WARP (placeholder)',
+          settings: data.outbound.settings,
+          streamSettings: '',
+        }),
+      })
+      setOutbounds(await api<Outbound[]>('/outbounds'))
+      setMsg(data.note || 'WARP placeholder added')
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function formatGeoFile(f?: GeodataStatus['geosite']) {
+    if (!f?.exists) return 'missing'
+    const kb = f.size != null ? `${(f.size / 1024).toFixed(0)} KB` : '?'
+    const mt = f.mtime ? new Date(f.mtime * 1000).toLocaleString() : '—'
+    return `${kb} · ${mt}`
+  }
+
   const outboundTags = useMemo(
     () => Array.from(new Set([...outbounds.map((o) => o.tag), 'direct', 'blocked'].filter(Boolean))),
     [outbounds],
@@ -242,6 +377,7 @@ export function XrayPage() {
     { id: 'basics', label: tr('xrayBasics') },
     { id: 'dns', label: tr('xrayDns') },
     { id: 'balancers', label: tr('xrayBalancers') },
+    { id: 'geodata', label: tr('geodata') },
     { id: 'advanced', label: tr('xrayAdvanced') },
     { id: 'routeTest', label: tr('xrayRouteTest') },
   ]
@@ -291,12 +427,41 @@ export function XrayPage() {
           <button className="btn" type="button" disabled={busy} onClick={() => void saveBasics()}>
             {busy ? '…' : tr('save')}
           </button>
+
+          <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+            <div className="label">{tr('xrayVersion')}</div>
+            <p className="page-sub" style={{ marginTop: 4 }}>
+              {xrayVer?.current || '—'}
+              {xrayVer?.bin ? (
+                <>
+                  {' · '}
+                  <code style={{ fontFamily: 'var(--mono)', fontSize: '0.8rem' }}>{xrayVer.bin}</code>
+                </>
+              ) : null}
+            </p>
+            <button className="btn secondary" type="button" disabled={busy} onClick={() => void installXray()}>
+              {tr('installXray')}
+            </button>
+          </div>
         </div>
       )}
 
       {tab === 'dns' && (
         <div className="card">
           <p className="page-sub" style={{ marginTop: 0 }}>{tr('xrayDnsHint')}</p>
+          <div className="row-actions" style={{ marginBottom: 10, flexWrap: 'wrap' }}>
+            {DNS_PRESETS.map((p) => (
+              <button
+                key={p.id}
+                className="btn secondary"
+                type="button"
+                disabled={busy}
+                onClick={() => void applyDnsPreset(p.servers)}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
           <textarea
             className="input"
             style={{ fontFamily: 'var(--mono)', minHeight: 280, width: '100%' }}
@@ -411,9 +576,49 @@ export function XrayPage() {
         </div>
       )}
 
+      {tab === 'geodata' && (
+        <div className="card">
+          <h3 style={{ marginTop: 0 }}>{tr('geodata')}</h3>
+          <p className="page-sub" style={{ marginTop: 0 }}>{tr('geodataHint')}</p>
+          <div className="grid2">
+            <div className="field">
+              <label className="label">geosite.dat</label>
+              <div className="page-sub">{formatGeoFile(geoStatus?.geosite)}</div>
+              <code style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{geoStatus?.geosite?.path || geoStatus?.dir || '—'}</code>
+            </div>
+            <div className="field">
+              <label className="label">geoip.dat</label>
+              <div className="page-sub">{formatGeoFile(geoStatus?.geoip)}</div>
+              <code style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{geoStatus?.geoip?.path || '—'}</code>
+            </div>
+            <div className="field" style={{ gridColumn: '1 / -1' }}>
+              <label className="label">geodataGeositeURL</label>
+              <input className="input" value={geoURLs.geosite} onChange={(e) => setGeoURLs({ ...geoURLs, geosite: e.target.value })} />
+            </div>
+            <div className="field" style={{ gridColumn: '1 / -1' }}>
+              <label className="label">geodataGeoipURL</label>
+              <input className="input" value={geoURLs.geoip} onChange={(e) => setGeoURLs({ ...geoURLs, geoip: e.target.value })} />
+            </div>
+          </div>
+          <div className="row-actions" style={{ marginTop: 10 }}>
+            <button className="btn secondary" type="button" disabled={busy} onClick={() => void saveGeoURLs()}>
+              {tr('save')}
+            </button>
+            <button className="btn" type="button" disabled={busy} onClick={() => void updateGeodata()}>
+              {busy ? '…' : tr('updateGeodata')}
+            </button>
+          </div>
+        </div>
+      )}
+
       {tab === 'advanced' && (
         <div className="card">
           <p className="page-sub" style={{ marginTop: 0 }}>{tr('xrayAdvancedHint')}</p>
+          <div className="row-actions" style={{ marginBottom: 10 }}>
+            <button className="btn secondary" type="button" disabled={busy} onClick={() => void addWarpPlaceholder()}>
+              {tr('addWarp')}
+            </button>
+          </div>
           <textarea
             className="input"
             style={{ fontFamily: 'var(--mono)', minHeight: 420, width: '100%' }}

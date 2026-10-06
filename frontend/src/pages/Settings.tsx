@@ -11,12 +11,26 @@ type SubInfo = {
   formats: string[]
 }
 
+type TwoFASetup = {
+  secret: string
+  otpauth: string
+  qr?: string
+}
+
+function truthy(v: string | undefined) {
+  return v === 'true' || v === '1' || v === 'yes' || v === 'on'
+}
+
 export function SettingsPage() {
   const { tr, theme, setTheme, accent, setAccent, lang, setLang } = useApp()
   const [settings, setSettings] = useState<Record<string, string>>({})
   const [subInfo, setSubInfo] = useState<SubInfo | null>(null)
   const [msg, setMsg] = useState('')
   const [pw, setPw] = useState({ oldPassword: '', newPassword: '' })
+  const [twoFA, setTwoFA] = useState<TwoFASetup | null>(null)
+  const [twoFACode, setTwoFACode] = useState('')
+  const [disablePw, setDisablePw] = useState('')
+  const [tgBusy, setTgBusy] = useState(false)
 
   useEffect(() => {
     api<Record<string, string>>('/settings').then((s) => {
@@ -48,7 +62,68 @@ export function SettingsPage() {
     }
   }
 
-  const subEnabled = (settings.subEnable ?? 'true') === 'true' || settings.subEnable === '1'
+  async function setup2FA() {
+    setMsg('')
+    try {
+      const data = await api<TwoFASetup>('/settings/2fa/setup')
+      setTwoFA(data)
+      setTwoFACode('')
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'error')
+    }
+  }
+
+  async function enable2FA() {
+    setMsg('')
+    try {
+      await api('/settings/2fa/enable', { method: 'POST', body: JSON.stringify({ code: twoFACode.trim() }) })
+      setSettings((s) => ({ ...s, twoFactorEnable: 'true' }))
+      setTwoFA(null)
+      setTwoFACode('')
+      setMsg('2FA enabled')
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'error')
+    }
+  }
+
+  async function disable2FA() {
+    setMsg('')
+    try {
+      const body: Record<string, string> = { code: twoFACode.trim() }
+      if (disablePw) body.password = disablePw
+      await api('/settings/2fa/disable', { method: 'POST', body: JSON.stringify(body) })
+      setSettings((s) => ({ ...s, twoFactorEnable: 'false' }))
+      setTwoFA(null)
+      setTwoFACode('')
+      setDisablePw('')
+      setMsg('2FA disabled')
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'error')
+    }
+  }
+
+  async function testTelegram() {
+    setMsg('')
+    setTgBusy(true)
+    try {
+      const token = settings.tgBotToken || ''
+      await api('/settings/tg-test', {
+        method: 'POST',
+        body: JSON.stringify({
+          tgBotToken: token.includes('***') || token.includes('…') ? '' : token,
+          tgBotChatId: settings.tgBotChatId || '',
+        }),
+      })
+      setMsg('Telegram test sent')
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'error')
+    } finally {
+      setTgBusy(false)
+    }
+  }
+
+  const subEnabled = truthy(settings.subEnable ?? 'true')
+  const twoFAOn = truthy(settings.twoFactorEnable)
 
   return (
     <div>
@@ -117,7 +192,27 @@ export function SettingsPage() {
           <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <input
               type="checkbox"
-              checked={(settings.ufwEnable ?? 'true') === 'true' || settings.ufwEnable === '1'}
+              checked={truthy(settings.subJsonEnable ?? 'true')}
+              onChange={(e) => setSettings({ ...settings, subJsonEnable: e.target.checked ? 'true' : 'false' })}
+            />
+            subJsonEnable — JSON subscription format
+          </label>
+        </div>
+        <div className="field">
+          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={truthy(settings.subClashEnable ?? 'true')}
+              onChange={(e) => setSettings({ ...settings, subClashEnable: e.target.checked ? 'true' : 'false' })}
+            />
+            subClashEnable — Clash subscription format
+          </label>
+        </div>
+        <div className="field">
+          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={truthy(settings.ufwEnable ?? 'true')}
               onChange={(e) => setSettings({ ...settings, ufwEnable: e.target.checked ? 'true' : 'false' })}
             />
             ufwEnable — auto-open ports in UFW (panel / sub / inbounds)
@@ -132,6 +227,108 @@ export function SettingsPage() {
           </div>
         )}
         <button className="btn" onClick={save}>{tr('save')}</button>
+      </div>
+
+      <div className="card" style={{ marginTop: 12 }}>
+        <h3 style={{ marginTop: 0 }}>Two-factor (TOTP)</h3>
+        <p className="page-sub">Status: {twoFAOn ? 'enabled' : 'disabled'}</p>
+        {!twoFAOn && (
+          <>
+            <div className="row-actions" style={{ marginBottom: 8 }}>
+              <button className="btn secondary" type="button" onClick={() => { void setup2FA() }}>Setup / QR</button>
+            </div>
+            {twoFA && (
+              <>
+                {twoFA.qr && <img src={twoFA.qr} alt="2FA QR" style={{ width: 180, height: 180, display: 'block', marginBottom: 8 }} />}
+                <div className="field">
+                  <label className="label">Secret (base32)</label>
+                  <input className="input" readOnly value={twoFA.secret} />
+                </div>
+                <div className="field">
+                  <label className="label">otpauth URL</label>
+                  <input className="input" readOnly value={twoFA.otpauth} />
+                </div>
+                <div className="field">
+                  <label className="label">Code from authenticator</label>
+                  <input className="input" value={twoFACode} onChange={(e) => setTwoFACode(e.target.value)} placeholder="123456" />
+                </div>
+                <button className="btn" type="button" onClick={() => { void enable2FA() }}>Enable 2FA</button>
+              </>
+            )}
+          </>
+        )}
+        {twoFAOn && (
+          <>
+            <div className="field">
+              <label className="label">Code</label>
+              <input className="input" value={twoFACode} onChange={(e) => setTwoFACode(e.target.value)} placeholder="123456" />
+            </div>
+            <div className="field">
+              <label className="label">Password (optional)</label>
+              <input className="input" type="password" value={disablePw} onChange={(e) => setDisablePw(e.target.value)} />
+            </div>
+            <button className="btn danger" type="button" onClick={() => { void disable2FA() }}>Disable 2FA</button>
+          </>
+        )}
+      </div>
+
+      <div className="card" style={{ marginTop: 12 }}>
+        <h3 style={{ marginTop: 0 }}>Telegram notify</h3>
+        <p className="page-sub">Panel bot (not TgProxy). Login alerts via api.telegram.org.</p>
+        <div className="field">
+          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={truthy(settings.tgBotEnable)}
+              onChange={(e) => setSettings({ ...settings, tgBotEnable: e.target.checked ? 'true' : 'false' })}
+            />
+            tgBotEnable
+          </label>
+        </div>
+        <div className="field">
+          <label className="label">tgBotToken</label>
+          <input
+            className="input"
+            value={settings.tgBotToken || ''}
+            onChange={(e) => setSettings({ ...settings, tgBotToken: e.target.value })}
+            placeholder="123456:ABC…"
+          />
+        </div>
+        <div className="field">
+          <label className="label">tgBotChatId</label>
+          <input
+            className="input"
+            value={settings.tgBotChatId || ''}
+            onChange={(e) => setSettings({ ...settings, tgBotChatId: e.target.value })}
+            placeholder="123456789"
+          />
+        </div>
+        <div className="field">
+          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={truthy(settings.tgNotifyLogin)}
+              onChange={(e) => setSettings({ ...settings, tgNotifyLogin: e.target.checked ? 'true' : 'false' })}
+            />
+            tgNotifyLogin
+          </label>
+        </div>
+        <div className="field">
+          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={truthy(settings.tgNotifyTraffic)}
+              onChange={(e) => setSettings({ ...settings, tgNotifyTraffic: e.target.checked ? 'true' : 'false' })}
+            />
+            tgNotifyTraffic
+          </label>
+        </div>
+        <div className="row-actions">
+          <button className="btn" type="button" onClick={save}>{tr('save')}</button>
+          <button className="btn secondary" type="button" disabled={tgBusy} onClick={() => { void testTelegram() }}>
+            {tgBusy ? '…' : 'Test Telegram'}
+          </button>
+        </div>
       </div>
 
       <div className="card" style={{ marginTop: 12 }}>

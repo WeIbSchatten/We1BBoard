@@ -141,31 +141,34 @@ func (s *Server) resolve(subID string) ([]subEntry, error) {
 	host := s.host()
 	out := make([]subEntry, 0, len(clients)*2)
 	seenExtra := map[string]bool{}
+	hosts, _ := loadEnabledHosts()
 	for _, cl := range clients {
 		for _, iid := range model.ParseInboundIDList(&cl) {
 			in, ok := imap[iid]
 			if !ok {
 				continue
 			}
-			adap, err := protocol.Get(in.Protocol)
-			if err != nil {
+			links, err := protocol.ShareLinksForHosts(&in, cl, host, hosts)
+			if err != nil || len(links) == 0 {
 				continue
 			}
-			link, err := adap.ShareLink(&in, cl, host)
-			if err != nil {
-				continue
-			}
-			name := cl.Email
-			if name == "" {
-				name = fmt.Sprintf("%s-%d", in.Protocol, cl.ID)
+			baseName := cl.Email
+			if baseName == "" {
+				baseName = fmt.Sprintf("%s-%d", in.Protocol, cl.ID)
 			}
 			if len(model.ParseInboundIDList(&cl)) > 1 {
-				name = fmt.Sprintf("%s [%s]", name, in.Remark)
+				baseName = fmt.Sprintf("%s [%s]", baseName, in.Remark)
 				if in.Remark == "" {
-					name = fmt.Sprintf("%s [%s:%d]", cl.Email, in.Protocol, in.Port)
+					baseName = fmt.Sprintf("%s [%s:%d]", cl.Email, in.Protocol, in.Port)
 				}
 			}
-			out = append(out, subEntry{Client: cl, Inbound: in, Link: link, Name: name})
+			for i, link := range links {
+				name := baseName
+				if len(links) > 1 {
+					name = fmt.Sprintf("%s #%d", baseName, i+1)
+				}
+				out = append(out, subEntry{Client: cl, Inbound: in, Link: link, Name: name})
+			}
 		}
 		for _, extra := range model.ExtraLinkLines(cl.ExtraLinks) {
 			if seenExtra[extra] {
@@ -181,6 +184,12 @@ func (s *Server) resolve(subID string) ([]subEntry, error) {
 		}
 	}
 	return out, nil
+}
+
+func loadEnabledHosts() ([]model.Host, error) {
+	var rows []model.Host
+	err := database.DB.Where("enable = ?", true).Order("sort_order asc, id asc").Find(&rows).Error
+	return rows, err
 }
 
 var errNotFound = fmt.Errorf("not found")
@@ -271,7 +280,10 @@ func detectFormat(ua, formatQ string) string {
 	case strings.Contains(ua, "clash") || strings.Contains(ua, "stash") ||
 		strings.Contains(ua, "mihomo") || strings.Contains(ua, "nuko") ||
 		strings.Contains(ua, "surge"):
-		return "clash"
+		if SubClashEnabled() {
+			return "clash"
+		}
+		return "base64"
 	case strings.Contains(ua, "sing-box") || strings.Contains(ua, "singbox") ||
 		strings.Contains(ua, "sfa") || strings.Contains(ua, "sfi") ||
 		strings.Contains(ua, "sfm") || strings.Contains(ua, "sft"):
@@ -279,6 +291,18 @@ func detectFormat(ua, formatQ string) string {
 	default:
 		return "base64"
 	}
+}
+
+// SubJsonEnabled reports whether JSON subscription format is allowed.
+func SubJsonEnabled() bool {
+	v := strings.ToLower(strings.TrimSpace(database.GetSetting("subJsonEnable")))
+	return v == "" || v == "true" || v == "1" || v == "yes" || v == "on"
+}
+
+// SubClashEnabled reports whether Clash subscription format is allowed.
+func SubClashEnabled() bool {
+	v := strings.ToLower(strings.TrimSpace(database.GetSetting("subClashEnable")))
+	return v == "" || v == "true" || v == "1" || v == "yes" || v == "on"
 }
 
 func (s *Server) handleAuto(c *gin.Context) {
@@ -302,10 +326,18 @@ func (s *Server) handleAuto(c *gin.Context) {
 	s.writeUserinfo(c, entries)
 	switch detectFormat(c.GetHeader("User-Agent"), c.Query("format")) {
 	case "clash":
+		if !SubClashEnabled() {
+			c.Status(http.StatusNotFound)
+			return
+		}
 		s.respondClash(c, entries)
 	case "singbox":
 		s.respondSingBox(c, entries)
 	case "json":
+		if !SubJsonEnabled() {
+			c.Status(http.StatusNotFound)
+			return
+		}
 		s.respondJSON(c, entries)
 	default:
 		s.respondBase64(c, entries)
@@ -313,6 +345,10 @@ func (s *Server) handleAuto(c *gin.Context) {
 }
 
 func (s *Server) handleJSON(c *gin.Context) {
+	if !SubJsonEnabled() {
+		c.Status(http.StatusNotFound)
+		return
+	}
 	subID := c.Param("subId")
 	if s.maybeServeSubPage(c, subID) {
 		return
@@ -331,6 +367,10 @@ func (s *Server) handleJSON(c *gin.Context) {
 }
 
 func (s *Server) handleClash(c *gin.Context) {
+	if !SubClashEnabled() {
+		c.Status(http.StatusNotFound)
+		return
+	}
 	subID := c.Param("subId")
 	if s.maybeServeSubPage(c, subID) {
 		return
@@ -708,6 +748,60 @@ func ValidateSettings(key, value string) error {
 		case "true", "false", "1", "0", "yes", "no", "on", "off", "":
 		default:
 			return fmt.Errorf("invalid subEnable")
+		}
+	case "subJsonEnable", "subClashEnable", "tgBotEnable", "tgNotifyLogin", "tgNotifyTraffic", "twoFactorEnable":
+		v := strings.ToLower(strings.TrimSpace(value))
+		switch v {
+		case "true", "false", "1", "0", "yes", "no", "on", "off", "":
+		default:
+			return fmt.Errorf("invalid %s", key)
+		}
+	case "tgBotToken":
+		v := strings.TrimSpace(value)
+		if v == "" || v == "***" || strings.Contains(v, "…") {
+			return nil
+		}
+		if len(v) > 128 || !strings.Contains(v, ":") {
+			return fmt.Errorf("invalid tgBotToken")
+		}
+		for _, c := range v {
+			if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == ':' {
+				continue
+			}
+			return fmt.Errorf("invalid tgBotToken")
+		}
+	case "tgBotChatId":
+		v := strings.TrimSpace(value)
+		if v == "" {
+			return nil
+		}
+		if len(v) > 64 {
+			return fmt.Errorf("invalid tgBotChatId")
+		}
+		if strings.HasPrefix(v, "@") {
+			name := v[1:]
+			if name == "" {
+				return fmt.Errorf("invalid tgBotChatId")
+			}
+			for _, c := range name {
+				if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' {
+					continue
+				}
+				return fmt.Errorf("invalid tgBotChatId")
+			}
+			return nil
+		}
+		start := 0
+		if v[0] == '-' {
+			start = 1
+		}
+		if start >= len(v) {
+			return fmt.Errorf("invalid tgBotChatId")
+		}
+		for _, c := range v[start:] {
+			if c < '0' || c > '9' {
+				return fmt.Errorf("invalid tgBotChatId")
+			}
 		}
 	case "subHost":
 		if value != "" && !security.ValidShareHost(value) {

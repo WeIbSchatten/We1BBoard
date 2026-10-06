@@ -6,6 +6,8 @@ import { Layout } from './Layout'
 import { BridgesPage } from './pages/Bridges'
 import { ClientsPage } from './pages/Clients'
 import { DashboardPage } from './pages/Dashboard'
+import { GroupsPage } from './pages/Groups'
+import { HostsPage } from './pages/Hosts'
 import { InboundsPage } from './pages/Inbounds'
 import { LoginPage } from './pages/Login'
 import { NodesPage } from './pages/Nodes'
@@ -30,6 +32,8 @@ function Authed() {
         <Route path="/" element={<DashboardPage />} />
         <Route path="/inbounds" element={<InboundsPage />} />
         <Route path="/clients" element={<ClientsPage />} />
+        <Route path="/groups" element={<GroupsPage />} />
+        <Route path="/hosts" element={<HostsPage />} />
         <Route path="/outbounds" element={<OutboundsPage />} />
         <Route path="/bridges" element={<BridgesPage />} />
         <Route path="/nodes" element={<NodesPage />} />

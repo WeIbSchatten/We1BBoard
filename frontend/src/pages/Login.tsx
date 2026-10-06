@@ -6,6 +6,8 @@ export function LoginPage() {
   const { tr, setAuthed } = useApp()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [code, setCode] = useState('')
+  const [need2fa, setNeed2fa] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -14,10 +16,14 @@ export function LoginPage() {
     setError('')
     setBusy(true)
     try {
-      await api('/login', { method: 'POST', body: JSON.stringify({ username, password }) })
+      const body: Record<string, string> = { username, password }
+      if (code.trim()) body.code = code.trim()
+      await api('/login', { method: 'POST', body: JSON.stringify(body) })
       setAuthed(true)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'error')
+      const msg = err instanceof Error ? err.message : 'error'
+      if (/two-factor/i.test(msg)) setNeed2fa(true)
+      setError(msg)
     } finally {
       setBusy(false)
     }
@@ -37,6 +43,20 @@ export function LoginPage() {
           <label className="label">{tr('password')}</label>
           <input className="input" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         </div>
+        {(need2fa || code) && (
+          <div className="field">
+            <label className="label">2FA code</label>
+            <input
+              className="input"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              placeholder="123456"
+              required={need2fa}
+            />
+          </div>
+        )}
         {error && <p className="error">{error}</p>}
         <button className="btn login-btn" type="submit" disabled={busy}>
           {busy ? '…' : tr('login')}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
+	"github.com/pquerna/otp/totp"
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/mem"
 	psnet "github.com/shirou/gopsutil/v4/net"
@@ -22,8 +23,10 @@ import (
 	"github.com/we1bboard/we1bboard/internal/protocol"
 	"github.com/we1bboard/we1bboard/internal/security"
 	"github.com/we1bboard/we1bboard/internal/sub"
+	"github.com/we1bboard/we1bboard/internal/tgnotify"
 	"github.com/we1bboard/we1bboard/internal/tgproxy"
 	"github.com/we1bboard/we1bboard/internal/web/middleware"
+	"github.com/we1bboard/we1bboard/internal/web/rates"
 	"github.com/we1bboard/we1bboard/internal/web/runtime"
 	"github.com/we1bboard/we1bboard/internal/web/service"
 	"github.com/we1bboard/we1bboard/internal/xray"
@@ -33,6 +36,7 @@ type API struct {
 	Auth     *service.AuthService
 	Inbound  *service.InboundService
 	Client   *service.ClientService
+	Host     *service.HostService
 	Outbound *service.OutboundService
 	Node     *service.NodeService
 	Routing  *service.RoutingService
@@ -55,6 +59,7 @@ func (a *API) Login(c *gin.Context) {
 	var req struct {
 		Username string `json:"username" binding:"required,max=64"`
 		Password string `json:"password" binding:"required,max=128"`
+		Code     string `json:"code"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, 400, err)
@@ -70,6 +75,18 @@ func (a *API) Login(c *gin.Context) {
 		fail(c, 401, fmt.Errorf("invalid credentials"))
 		return
 	}
+	if settingTruthy(database.GetSetting("twoFactorEnable")) {
+		secret := database.GetSetting("twoFactorSecret")
+		code := strings.TrimSpace(req.Code)
+		if code == "" {
+			fail(c, 401, fmt.Errorf("two-factor code required"))
+			return
+		}
+		if secret == "" || !totp.Validate(code, secret) {
+			fail(c, 401, fmt.Errorf("invalid two-factor code"))
+			return
+		}
+	}
 	sess := sessions.Default(c)
 	sess.Clear()
 	sess.Options(sessions.Options{
@@ -82,6 +99,7 @@ func (a *API) Login(c *gin.Context) {
 	sess.Set("uid", u.ID)
 	sess.Set("username", u.Username)
 	_ = sess.Save()
+	go tgnotify.NotifyLogin(u.Username, c.ClientIP())
 	ok(c, gin.H{"username": u.Username})
 }
 
@@ -152,6 +170,13 @@ func (a *API) ListInbounds(c *gin.Context) {
 		return
 	}
 	ok(c, rows)
+}
+
+// InboundRates returns [{id, upRate, downRate}] in bytes/sec from in-memory samples.
+// GET /inbounds/rates
+func (a *API) InboundRates(c *gin.Context) {
+	rates.SampleFromDB()
+	ok(c, rates.All())
 }
 
 func (a *API) CreateInbound(c *gin.Context) {
@@ -306,6 +331,26 @@ func (a *API) ClientLink(c *gin.Context) {
 	ok(c, gin.H{"link": link})
 }
 
+// ClientLinks returns all share links (one per host) for a client.
+// GET /clients/:id/links
+func (a *API) ClientLinks(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	host := c.Query("host")
+	if host != "" && !security.ValidShareHost(host) {
+		fail(c, 400, fmt.Errorf("invalid host"))
+		return
+	}
+	links, err := a.Client.ShareLinks(uint(id), host)
+	if err != nil {
+		fail(c, 400, err)
+		return
+	}
+	if links == nil {
+		links = []string{}
+	}
+	ok(c, gin.H{"links": links})
+}
+
 func (a *API) ClientQR(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
 	host := c.Query("host")
@@ -317,6 +362,10 @@ func (a *API) ClientQR(c *gin.Context) {
 	if err != nil {
 		fail(c, 400, err)
 		return
+	}
+	// QR encodes the first link when multiple hosts are configured.
+	if i := strings.IndexByte(link, '\n'); i >= 0 {
+		link = link[:i]
 	}
 	png, err := qrcode.Encode(link, qrcode.Medium, 256)
 	if err != nil {
@@ -347,13 +396,20 @@ func (a *API) ClientSub(c *gin.Context) {
 }
 
 func (a *API) SubscriptionInfo(c *gin.Context) {
+	formats := []string{"auto", "base64", "singbox"}
+	if sub.SubClashEnabled() {
+		formats = append(formats, "clash")
+	}
+	if sub.SubJsonEnabled() {
+		formats = append(formats, "json")
+	}
 	ok(c, gin.H{
 		"enable":  sub.Enabled(),
 		"subPort": database.GetSetting("subPort"),
 		"subPath": sub.NormalizePath(database.GetSetting("subPath")),
 		"subHost": database.GetSetting("subHost"),
 		"baseUrl": sub.PublicBaseURL(""),
-		"formats": []string{"auto", "base64", "clash", "singbox", "json"},
+		"formats": formats,
 	})
 }
 
@@ -376,6 +432,15 @@ func (a *API) UpdateSettings(c *gin.Context) {
 		if !database.AllowedSettingKeys[k] {
 			fail(c, 400, fmt.Errorf("setting %q is not writable via API", k))
 			return
+		}
+		// Keep existing secret when UI sends masked placeholder.
+		if database.SensitiveSettings[k] && (v == "***" || strings.Contains(v, "…") || v == "") {
+			if v == "" && database.GetSetting(k) != "" && k == "tgBotToken" {
+				continue // blank = leave unchanged when token already set
+			}
+			if v == "***" || strings.Contains(v, "…") {
+				continue
+			}
 		}
 		maxLen := 8192
 		if k == "xrayTemplate" {
@@ -414,11 +479,13 @@ func (a *API) ServerStatus(c *gin.Context) {
 	if conns, err := psnet.Connections("udp"); err == nil {
 		udpCount = len(conns)
 	}
-	var xrayUptime int64
+var xrayUptime int64
 	xrayRunning := a.Xray != nil && a.Xray.IsRunning()
 	if a.Xray != nil && xrayRunning {
 		xrayUptime = int64(a.Xray.Uptime().Seconds())
 	}
+	// Refresh inbound traffic rates on every status poll (Dashboard interval).
+	rates.SampleFromDB()
 	ok(c, gin.H{
 		"version":     config.Version,
 		"xrayRunning": xrayRunning,
@@ -899,6 +966,176 @@ func (a *API) ChangePassword(c *gin.Context) {
 		return
 	}
 	if err := a.Auth.ChangePassword(username, req.OldPassword, req.NewPassword); err != nil {
+		fail(c, 400, err)
+		return
+	}
+	ok(c, nil)
+}
+
+// --- Client Groups ---
+
+func (a *API) ListClientGroups(c *gin.Context) {
+	rows, err := a.Client.ListGroups()
+	if err != nil {
+		fail(c, 500, err)
+		return
+	}
+	ok(c, rows)
+}
+
+func (a *API) CreateClientGroup(c *gin.Context) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, 400, err)
+		return
+	}
+	if err := a.Client.CreateGroup(req.Name); err != nil {
+		fail(c, 400, err)
+		return
+	}
+	ok(c, nil)
+}
+
+func (a *API) RenameClientGroup(c *gin.Context) {
+	var req struct {
+		OldName string `json:"oldName"`
+		NewName string `json:"newName"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, 400, err)
+		return
+	}
+	n, err := a.Client.RenameGroup(req.OldName, req.NewName)
+	if err != nil {
+		fail(c, 400, err)
+		return
+	}
+	ok(c, gin.H{"affected": n})
+}
+
+func (a *API) DeleteClientGroup(c *gin.Context) {
+	name := c.Param("name")
+	n, err := a.Client.DeleteGroup(name)
+	if err != nil {
+		fail(c, 400, err)
+		return
+	}
+	ok(c, gin.H{"affected": n})
+}
+
+func (a *API) AssignClientGroup(c *gin.Context) {
+	var req struct {
+		Name string `json:"name"`
+		IDs  []uint `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, 400, err)
+		return
+	}
+	n, err := a.Client.AssignGroup(req.Name, req.IDs)
+	if err != nil {
+		fail(c, 400, err)
+		return
+	}
+	ok(c, gin.H{"affected": n})
+}
+
+func (a *API) UnassignClientGroup(c *gin.Context) {
+	var req struct {
+		IDs []uint `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, 400, err)
+		return
+	}
+	n, err := a.Client.UnassignGroup(req.IDs)
+	if err != nil {
+		fail(c, 400, err)
+		return
+	}
+	ok(c, gin.H{"affected": n})
+}
+
+func (a *API) ResetClientGroupTraffic(c *gin.Context) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, 400, err)
+		return
+	}
+	n, err := a.Client.ResetGroupTraffic(req.Name)
+	if err != nil {
+		fail(c, 400, err)
+		return
+	}
+	ok(c, gin.H{"affected": n})
+}
+
+// --- Subscription Hosts ---
+
+func (a *API) ListHosts(c *gin.Context) {
+	rows, err := a.Host.List()
+	if err != nil {
+		fail(c, 500, err)
+		return
+	}
+	ok(c, rows)
+}
+
+func (a *API) CreateHost(c *gin.Context) {
+	var h model.Host
+	if err := c.ShouldBindJSON(&h); err != nil {
+		fail(c, 400, err)
+		return
+	}
+	if err := a.Host.Create(&h); err != nil {
+		fail(c, 400, err)
+		return
+	}
+	ok(c, h)
+}
+
+func (a *API) UpdateHost(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	var h model.Host
+	if err := c.ShouldBindJSON(&h); err != nil {
+		fail(c, 400, err)
+		return
+	}
+	h.ID = uint(id)
+	if err := a.Host.Update(&h); err != nil {
+		fail(c, 400, err)
+		return
+	}
+	ok(c, h)
+}
+
+func (a *API) DeleteHost(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	if err := a.Host.Delete(uint(id)); err != nil {
+		fail(c, 400, err)
+		return
+	}
+	ok(c, nil)
+}
+
+func (a *API) EnableHost(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	var req struct {
+		Enable *bool `json:"enable"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, 400, err)
+		return
+	}
+	enable := true
+	if req.Enable != nil {
+		enable = *req.Enable
+	}
+	if err := a.Host.SetEnable(uint(id), enable); err != nil {
 		fail(c, 400, err)
 		return
 	}

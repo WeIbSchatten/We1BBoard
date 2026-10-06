@@ -68,6 +68,9 @@ func Init(cfg *config.Config) error {
 		if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 			return fmt.Errorf("create db dir: %w", err)
 		}
+		if err := applyPendingRestore(cfg); err != nil {
+			log.Printf("restore apply: %v", err)
+		}
 		dsn := dbPath + "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)"
 		db, err = gorm.Open(sqlite.Open(dsn), gormCfg)
 		if err != nil {
@@ -98,7 +101,9 @@ func Init(cfg *config.Config) error {
 		&model.Setting{},
 		&model.Inbound{},
 		&model.Client{},
+		&model.Host{},
 		&model.Outbound{},
+		&model.OutboundSubscription{},
 		&model.Node{},
 		&model.Bridge{},
 		&model.TgProxyProfile{},
@@ -147,6 +152,34 @@ func restrictFilePerms(path string) error {
 	return os.Chmod(path, 0o600)
 }
 
+// applyPendingRestore renames {DataDir}/we1bboard.db.restoring over DBPath before open.
+func applyPendingRestore(cfg *config.Config) error {
+	dataDir := cfg.DataDir
+	if dataDir == "" {
+		dataDir = filepath.Dir(cfg.DBPath)
+	}
+	pending := filepath.Join(dataDir, "we1bboard.db.restoring")
+	st, err := os.Stat(pending)
+	if err != nil || st.IsDir() || st.Size() < 100 {
+		return nil
+	}
+	dbPath := cfg.DBPath
+	bak := dbPath + ".pre-restore"
+	_ = os.Remove(bak)
+	if _, err := os.Stat(dbPath); err == nil {
+		if err := os.Rename(dbPath, bak); err != nil {
+			return fmt.Errorf("backup current db: %w", err)
+		}
+	}
+	if err := os.Rename(pending, dbPath); err != nil {
+		_ = os.Rename(bak, dbPath) // best-effort rollback
+		return fmt.Errorf("apply restore: %w", err)
+	}
+	_ = restrictFilePerms(dbPath)
+	log.Printf("applied pending database restore from %s", pending)
+	return nil
+}
+
 func seed(db *gorm.DB) error {
 	var count int64
 	db.Model(&model.User{}).Count(&count)
@@ -174,6 +207,9 @@ func seed(db *gorm.DB) error {
 		"subSupportUrl": "",
 		"subThemeDir":   "",
 		"subAnnounce":   "",
+		"subJsonEnable": "true",
+		"subClashEnable": "true",
+		"clientGroups":  "[]",
 		"ufwEnable":     "true",
 		"theme":         "night",
 		"accent":       "blue",
@@ -183,8 +219,17 @@ func seed(db *gorm.DB) error {
 		"keyFile":      "",
 		"secret":       mustRandomSecret(),
 		"nodeToken":    mustRandomSecret(),
+		"twoFactorEnable": "false",
+		"twoFactorSecret": "",
+		"tgBotEnable":     "false",
+		"tgBotToken":      "",
+		"tgBotChatId":     "",
+		"tgNotifyLogin":   "false",
+		"tgNotifyTraffic": "false",
 		"trafficCron":            "@every 10s",
 		"routingDomainStrategy":  "AsIs",
+		"geodataGeositeURL": "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat",
+		"geodataGeoipURL":   "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat",
 	}
 	for k, v := range defaults {
 		var s model.Setting
@@ -273,8 +318,10 @@ func SetSetting(key, value string) error {
 
 // SensitiveSettings must never be returned to the browser.
 var SensitiveSettings = map[string]bool{
-	"secret":    true,
-	"nodeToken": true,
+	"secret":          true,
+	"nodeToken":       true,
+	"twoFactorSecret": true,
+	"tgBotToken":      true,
 }
 
 func AllSettingsPublic() (map[string]string, error) {
@@ -285,7 +332,11 @@ func AllSettingsPublic() (map[string]string, error) {
 	m := make(map[string]string, len(rows))
 	for _, r := range rows {
 		if SensitiveSettings[r.Key] {
-			m[r.Key] = "***"
+			if r.Value == "" {
+				m[r.Key] = ""
+			} else {
+				m[r.Key] = "***"
+			}
 			continue
 		}
 		m[r.Key] = r.Value
@@ -309,9 +360,16 @@ func AllSettings() (map[string]string, error) {
 var AllowedSettingKeys = map[string]bool{
 	"panelPort": true, "panelPath": true, "webListen": true,
 	"subPort": true, "subPath": true, "subEnable": true, "subHost": true, "subTitle": true, "subSupportUrl": true, "subThemeDir": true, "subAnnounce": true,
+	"subJsonEnable": true, "subClashEnable": true,
+	"clientGroups": true,
 	"ufwEnable": true,
 	"theme": true, "accent": true, "lang": true,
 	"xrayTemplate": true, "certFile": true, "keyFile": true,
 	"trafficCron": true,
 	"routingDomainStrategy": true,
+	"geodataGeositeURL": true,
+	"geodataGeoipURL":   true,
+	"twoFactorEnable": true, "twoFactorSecret": true,
+	"tgBotEnable": true, "tgBotToken": true, "tgBotChatId": true,
+	"tgNotifyLogin": true, "tgNotifyTraffic": true,
 }

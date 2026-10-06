@@ -65,6 +65,7 @@ type Client struct {
 	Password   string    `gorm:"size:255" json:"password"`
 	Flow       string    `gorm:"size:64" json:"flow"`
 	SubID      string    `gorm:"size:64;index" json:"subId"`
+	Group      string    `gorm:"column:group_name;size:128;index" json:"group"`
 	LimitIP    int       `json:"limitIp"`
 	TotalGB    int64     `json:"totalGB"`
 	ExpiryTime int64     `json:"expiryTime"`
@@ -76,6 +77,27 @@ type Client struct {
 	Comment    string    `gorm:"size:512" json:"comment"`
 	CreatedAt  time.Time `json:"createdAt"`
 	UpdatedAt  time.Time `json:"updatedAt"`
+}
+
+// Host is a subscription/share-link endpoint override (address, port, SNI, …).
+// InboundID 0 with empty InboundTag = all inbounds; InboundID 0 + tag = tag match.
+type Host struct {
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	Enable       bool      `gorm:"default:true" json:"enable"`
+	Remark       string    `gorm:"size:255" json:"remark"`
+	InboundID    uint      `gorm:"index;default:0" json:"inboundId"`
+	InboundTag   string    `gorm:"size:128;index" json:"inboundTag"`
+	Address      string    `gorm:"size:255;not null" json:"address"`
+	Port         int       `json:"port"` // 0 = use inbound port
+	SNI          string    `gorm:"size:255" json:"sni"`
+	HostHeader   string    `gorm:"size:255" json:"hostHeader"`
+	Path         string    `gorm:"size:255" json:"path"`
+	ALPN         string    `gorm:"size:128" json:"alpn"`
+	Fingerprint  string    `gorm:"size:64" json:"fingerprint"`
+	AllowInsecure bool     `json:"allowInsecure"`
+	SortOrder    int       `gorm:"default:0" json:"sortOrder"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
 type Outbound struct {
@@ -173,6 +195,20 @@ type RoutingRule struct {
 	Port        string    `gorm:"size:64" json:"port"`
 	Network     string    `gorm:"size:32" json:"network"`
 	Protocol    string    `gorm:"size:64" json:"protocol"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+// OutboundSubscription is a remote share-link list that upserts Outbound rows on refresh.
+type OutboundSubscription struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	Remark      string    `gorm:"size:255" json:"remark"`
+	URL         string    `gorm:"size:1024;not null" json:"url"`
+	Enable      bool      `gorm:"default:true" json:"enable"`
+	Prefix      string    `gorm:"size:64;default:sub-" json:"prefix"`
+	IntervalMin int       `gorm:"default:0" json:"intervalMin"` // 0 = manual only
+	LastFetch   int64     `json:"lastFetch"`
+	LastError   string    `gorm:"size:512" json:"lastError"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
 }

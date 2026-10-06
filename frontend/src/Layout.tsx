@@ -6,6 +6,8 @@ const links = [
   ['/', 'dashboard', '◎'],
   ['/inbounds', 'inbounds', '⇢'],
   ['/clients', 'clients', '◉'],
+  ['/groups', 'groups', '▦'],
+  ['/hosts', 'hosts', '⌂'],
   ['/outbounds', 'outbounds', '⇠'],
   ['/bridges', 'bridges', '⇄'],
   ['/nodes', 'nodes', '⬡'],

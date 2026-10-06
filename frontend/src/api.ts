@@ -5,6 +5,8 @@ const API_BASE = (() => {
   return '/we1b/api'
 })()
 
+export { API_BASE }
+
 export async function api<T = unknown>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(API_BASE + path, {
     credentials: 'include',
@@ -42,6 +44,7 @@ export type Client = {
   password: string
   flow: string
   subId: string
+  group?: string
   limitIp?: number
   totalGB: number
   expiryTime: number
@@ -51,6 +54,30 @@ export type Client = {
   down: number
   comment: string
   tgId?: number
+}
+
+export type GroupSummary = {
+  name: string
+  count: number
+  up: number
+  down: number
+}
+
+export type Host = {
+  id: number
+  enable: boolean
+  remark: string
+  inboundId: number
+  inboundTag: string
+  address: string
+  port: number
+  sni: string
+  hostHeader: string
+  path: string
+  alpn: string
+  fingerprint: string
+  allowInsecure: boolean
+  sortOrder: number
 }
 
 export type Bridge = {
@@ -115,4 +142,37 @@ export type Outbound = {
   streamSettings: string
   enable: boolean
   remark: string
+}
+
+export type OutboundSubscription = {
+  id: number
+  remark: string
+  url: string
+  enable: boolean
+  prefix: string
+  intervalMin: number
+  lastFetch: number
+  lastError: string
+}
+
+export type ServerHistory = {
+  cpu: number[]
+  mem: number[]
+  tcp: number[]
+  udp: number[]
+}
+
+export type GeodataFileStatus = {
+  exists: boolean
+  path?: string
+  size?: number
+  mtime?: number
+}
+
+export type GeodataStatus = {
+  geosite: GeodataFileStatus
+  geoip: GeodataFileStatus
+  geositeURL: string
+  geoipURL: string
+  dir: string
 }

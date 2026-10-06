@@ -2,12 +2,28 @@ import { Fragment, useEffect, useState } from 'react'
 import { api, type Client, type Inbound } from '../api'
 import { useApp } from '../AppContext'
 import { ClientFormModal } from '../components/ClientFormModal'
+import { ClientInfoModal } from '../components/ClientInfoModal'
 import { InboundFormModal } from '../components/InboundFormModal'
 import { inboundSupportsClients } from '../lib/inboundForm'
+
+type RateRow = { id: number; upRate: number; downRate: number }
+
+function formatRate(bps: number): string {
+  if (!bps || bps < 1) return '0 B/s'
+  const units = ['B/s', 'KB/s', 'MB/s', 'GB/s']
+  let v = bps
+  let i = 0
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024
+    i++
+  }
+  return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`
+}
 
 export function InboundsPage() {
   const { tr } = useApp()
   const [rows, setRows] = useState<Inbound[]>([])
+  const [rates, setRates] = useState<Record<number, RateRow>>({})
   const [expanded, setExpanded] = useState<number | null>(null)
   const [inboundModal, setInboundModal] = useState<{ open: boolean; mode: 'add' | 'edit'; inbound: Inbound | null }>({
     open: false, mode: 'add', inbound: null,
@@ -15,17 +31,28 @@ export function InboundsPage() {
   const [clientModal, setClientModal] = useState<{ open: boolean; mode: 'add' | 'edit'; inbound: Inbound | null; client: Client | null }>({
     open: false, mode: 'add', inbound: null, client: null,
   })
-  const [link, setLink] = useState('')
-  const [subUrls, setSubUrls] = useState<Record<string, string> | null>(null)
-  const [qrClientId, setQrClientId] = useState<number | null>(null)
+  const [infoClient, setInfoClient] = useState<Client | null>(null)
+  const [infoTab, setInfoTab] = useState<'info' | 'links' | 'sub' | 'qr'>('info')
   const [pendingClientInbound, setPendingClientInbound] = useState<Inbound | null>(null)
 
   async function load() {
     setRows(await api<Inbound[]>('/inbounds'))
   }
 
+  async function loadRates() {
+    try {
+      const list = await api<RateRow[]>('/inbounds/rates')
+      const map: Record<number, RateRow> = {}
+      for (const r of list || []) map[r.id] = r
+      setRates(map)
+    } catch { /* ignore */ }
+  }
+
   useEffect(() => {
     load().catch(console.error)
+    loadRates().catch(() => {})
+    const t = setInterval(() => { void loadRates() }, 5000)
+    return () => clearInterval(t)
   }, [])
 
   useEffect(() => {
@@ -64,26 +91,6 @@ export function InboundsPage() {
     await load()
     setExpanded(created.id)
   }
-
-  async function showLink(client?: Client) {
-    if (!client) return
-    const data = await api<{ link: string }>(`/clients/${client.id}/link`)
-    setLink(data.link)
-    setSubUrls(null)
-    setQrClientId(client.id)
-  }
-
-  async function showSub(client?: Client) {
-    if (!client) return
-    const data = await api<{ urls: Record<string, string>; subId: string; enable: boolean }>(`/clients/${client.id}/sub`)
-    setSubUrls(data.urls)
-    setLink('')
-    setQrClientId(null)
-  }
-
-  const qrSrc = qrClientId
-    ? `${window.location.pathname.includes('/we1b') ? window.location.pathname.slice(0, window.location.pathname.indexOf('/we1b') + 5) : '/we1b'}/api/clients/${qrClientId}/qr`
-    : ''
 
   function traffic(c: Client) {
     const used = ((c.up || 0) + (c.down || 0)) / (1024 * 1024 * 1024)
@@ -125,6 +132,7 @@ export function InboundsPage() {
               <th>{tr('port')}</th>
               <th>{tr('network')}</th>
               <th>{tr('security')}</th>
+              <th>{tr('speed')}</th>
               <th>{tr('clients')}</th>
               <th>{tr('status')}</th>
               <th>{tr('actions')}</th>
@@ -132,7 +140,7 @@ export function InboundsPage() {
           </thead>
           <tbody>
             {rows.length === 0 && (
-              <tr><td colSpan={10}>{tr('empty')}</td></tr>
+              <tr><td colSpan={11}>{tr('empty')}</td></tr>
             )}
             {rows.map((r) => {
               let net = '—'
@@ -144,6 +152,7 @@ export function InboundsPage() {
               } catch { /* */ }
               const open = expanded === r.id
               const clients = r.clients || []
+              const rate = rates[r.id]
               return (
                 <Fragment key={r.id}>
                   <tr>
@@ -163,6 +172,11 @@ export function InboundsPage() {
                     <td><code style={{ fontFamily: 'var(--mono)' }}>{r.port}</code></td>
                     <td><span className="badge">{net}</span></td>
                     <td><span className="badge">{sec}</span></td>
+                    <td style={{ fontFamily: 'var(--mono)', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
+                      <span style={{ color: 'var(--accent)' }}>↑{formatRate(rate?.upRate || 0)}</span>
+                      {' '}
+                      <span style={{ color: 'var(--warn)' }}>↓{formatRate(rate?.downRate || 0)}</span>
+                    </td>
                     <td>{clients.length}</td>
                     <td><span className={`badge ${r.enable ? 'on' : 'off'}`}>{r.enable ? tr('enable') : tr('disable')}</span></td>
                     <td className="row-actions">
@@ -176,7 +190,7 @@ export function InboundsPage() {
                   </tr>
                   {open && (
                     <tr>
-                      <td colSpan={10} style={{ padding: '0.5rem 0.75rem 1rem' }}>
+                      <td colSpan={11} style={{ padding: '0.5rem 0.75rem 1rem' }}>
                         {clients.length === 0 ? (
                           <p className="page-sub" style={{ margin: '0.5rem 0' }}>
                             {tr('empty')} —{' '}
@@ -205,8 +219,8 @@ export function InboundsPage() {
                                   <td>{expiryLabel(c)}</td>
                                   <td><span className={`badge ${c.enable ? 'on' : 'off'}`}>{c.enable ? tr('enable') : tr('disable')}</span></td>
                                   <td className="row-actions">
-                                    <button className="btn secondary" onClick={() => showLink(c)}>{tr('link')}</button>
-                                    <button className="btn secondary" onClick={() => showSub(c)}>{tr('subscription')}</button>
+                                    <button className="btn secondary" onClick={() => { setInfoTab('links'); setInfoClient(c) }}>{tr('link')}</button>
+                                    <button className="btn secondary" onClick={() => { setInfoTab('sub'); setInfoClient(c) }}>{tr('subscription')}</button>
                                     <button className="btn secondary" onClick={() => { void resetTraffic(c.id) }}>{tr('resetTraffic')}</button>
                                     <button className="btn secondary" onClick={() => setClientModal({ open: true, mode: 'edit', inbound: r, client: c })}>{tr('edit')}</button>
                                     <button className="btn danger" onClick={() => removeClient(c.id)}>{tr('delete')}</button>
@@ -226,25 +240,14 @@ export function InboundsPage() {
         </table>
       </div>
 
-      {link && (
-        <div className="card" style={{ marginTop: 12 }}>
-          <div className="label">{tr('link')}</div>
-          <textarea className="textarea" readOnly value={link} onFocus={(e) => e.target.select()} />
-          {qrSrc && <img src={qrSrc} alt="qr" style={{ marginTop: 12, width: 180, height: 180, background: '#fff', padding: 8, borderRadius: 8 }} />}
-        </div>
-      )}
-
-      {subUrls && (
-        <div className="card" style={{ marginTop: 12 }}>
-          <div className="label">{tr('subscription')}</div>
-          {Object.entries(subUrls).map(([k, v]) => (
-            <div className="field" key={k}>
-              <label className="label">{k}</label>
-              <input className="input" readOnly value={v} onFocus={(e) => e.target.select()} />
-            </div>
-          ))}
-        </div>
-      )}
+      <ClientInfoModal
+        open={!!infoClient}
+        client={infoClient}
+        inbounds={rows}
+        initialTab={infoTab}
+        onClose={() => setInfoClient(null)}
+        onResetTraffic={() => { void load() }}
+      />
 
       <InboundFormModal
         open={inboundModal.open}
