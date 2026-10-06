@@ -113,6 +113,16 @@ export function SettingsPage() {
             <input className="input" value={settings[k] || ''} onChange={(e) => setSettings({ ...settings, [k]: e.target.value })} placeholder={k === 'subThemeDir' ? '/etc/we1bboard/sub_templates/my-theme' : undefined} />
           </div>
         ))}
+        <div className="field">
+          <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={(settings.ufwEnable ?? 'true') === 'true' || settings.ufwEnable === '1'}
+              onChange={(e) => setSettings({ ...settings, ufwEnable: e.target.checked ? 'true' : 'false' })}
+            />
+            ufwEnable — auto-open ports in UFW (panel / sub / inbounds)
+          </label>
+        </div>
         <p className="page-sub">В браузере URL подписки открывает HTML-страницу (копирование ссылок + QR). VPN-клиенты получают raw. Полная страница с конфигами: <code>?html=1</code>. Кастомный шаблон: абсолютный путь к папке с <code>sub.html</code> или <code>index.html</code> (как 3x-ui).</p>
         {subInfo && (
           <div className="field">

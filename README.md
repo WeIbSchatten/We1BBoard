@@ -77,6 +77,11 @@ bash <(curl -fsSL https://raw.githubusercontent.com/WeIbSchatten/We1BBoard/main/
 Данные (`/etc/we1bboard`) не трогаются.  
 Релизы: GitHub Actions по тегу `v*` (linux amd64/arm64).
 
+## Firewall (UFW)
+
+При установке можно включить UFW и открыть порты панели / подписки / 80 / 443.  
+В Settings: `ufwEnable` — при создании inbound панель сама делает `ufw allow <port>/tcp`.
+
 ## Подписки (как в 3x-ui)
 
 После установки у каждого клиента есть `subId`. В панели: **Inbounds → Подписка**.

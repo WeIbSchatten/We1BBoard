@@ -9,6 +9,7 @@ import (
 	"github.com/we1bboard/we1bboard/internal/database/model"
 	"github.com/we1bboard/we1bboard/internal/protocol"
 	"github.com/we1bboard/we1bboard/internal/sub"
+	"github.com/we1bboard/we1bboard/internal/ufw"
 	"github.com/we1bboard/we1bboard/internal/web/runtime"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -57,6 +58,7 @@ func (s *InboundService) Create(in *model.Inbound) error {
 	if err := database.DB.Create(in).Error; err != nil {
 		return err
 	}
+	ufw.SyncInbound(in, false)
 	_ = s.RT.ForNode(in.NodeID).Reload()
 	return nil
 }
@@ -69,9 +71,15 @@ func (s *InboundService) Update(in *model.Inbound) error {
 	if err := adap.Validate(in); err != nil {
 		return err
 	}
+	var old model.Inbound
+	_ = database.DB.First(&old, in.ID)
 	if err := database.DB.Save(in).Error; err != nil {
 		return err
 	}
+	if old.Port != 0 && old.Port != in.Port {
+		ufw.DeleteTCP(old.Port)
+	}
+	ufw.SyncInbound(in, false)
 	_ = s.RT.ForNode(in.NodeID).Reload()
 	return nil
 }
@@ -81,6 +89,7 @@ func (s *InboundService) Delete(id uint) error {
 	if err != nil {
 		return err
 	}
+	ufw.SyncInbound(in, true)
 	if err := database.DB.Where("inbound_id = ?", id).Delete(&model.Client{}).Error; err != nil {
 		return err
 	}

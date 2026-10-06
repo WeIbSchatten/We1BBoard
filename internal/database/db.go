@@ -44,7 +44,7 @@ func Dialect() string {
 // Init opens SQLite or PostgreSQL (WE1B_DB_TYPE / WE1B_DB_DSN), like 3x-ui.
 func Init(cfg *config.Config) error {
 	gormCfg := &gorm.Config{
-		Logger:                                   logger.Default.LogMode(logger.Warn),
+		Logger:                                   logger.Default.LogMode(logger.Error),
 		DisableForeignKeyConstraintWhenMigrating: true,
 	}
 
@@ -160,7 +160,7 @@ func seed(db *gorm.DB) error {
 			return err
 		}
 		writeInstallCredentials("admin", pass)
-		log.Printf("We1BBoard initial admin created — username=admin password=%s (also written to install-result.env)", pass)
+		log.Printf("We1BBoard: initial admin user created (credentials in %s/install-result.env)", envDataDir())
 	}
 	defaults := map[string]string{
 		"panelPort":    "2053",
@@ -174,6 +174,7 @@ func seed(db *gorm.DB) error {
 		"subSupportUrl": "",
 		"subThemeDir":   "",
 		"subAnnounce":   "",
+		"ufwEnable":     "true",
 		"theme":         "night",
 		"accent":       "blue",
 		"lang":         "ru",
@@ -233,14 +234,19 @@ func mustRandomPassword(n int) string {
 }
 
 func writeInstallCredentials(user, pass string) {
-	dir := os.Getenv("WE1B_DATA_DIR")
-	if dir == "" {
-		dir = "/etc/we1bboard"
-	}
+	dir := envDataDir()
 	_ = os.MkdirAll(dir, 0o755)
 	path := filepath.Join(dir, "install-result.env")
 	body := fmt.Sprintf("WE1B_USERNAME=%q\nWE1B_PASSWORD=%q\n", user, pass)
 	_ = os.WriteFile(path, []byte(body), 0o600)
+}
+
+func envDataDir() string {
+	dir := os.Getenv("WE1B_DATA_DIR")
+	if dir == "" {
+		dir = "/etc/we1bboard"
+	}
+	return dir
 }
 
 func GetSetting(key string) string {
@@ -302,6 +308,7 @@ func AllSettings() (map[string]string, error) {
 var AllowedSettingKeys = map[string]bool{
 	"panelPort": true, "panelPath": true, "webListen": true,
 	"subPort": true, "subPath": true, "subEnable": true, "subHost": true, "subTitle": true, "subSupportUrl": true, "subThemeDir": true, "subAnnounce": true,
+	"ufwEnable": true,
 	"theme": true, "accent": true, "lang": true,
 	"xrayTemplate": true, "certFile": true, "keyFile": true,
 	"trafficCron": true,

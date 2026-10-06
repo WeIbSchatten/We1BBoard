@@ -93,6 +93,22 @@ PANEL_PATH="/we1b/"
 log() { echo -e "${GREEN}[We1BBoard]${NC} $*"; }
 warn() { echo -e "${YELLOW}[warn]${NC} $*"; }
 err() { echo -e "${RED}[error]${NC} $*" >&2; }
+step() { echo -e "\n${BLUE}==> Step $1:${NC} $2"; }
+
+banner() {
+  echo -e "${BLUE}"
+  cat <<'EOF'
+ __          __ ___ ____  ____                      _
+ \ \        / /__ \  _ \|  _ \                    | |
+  \ \  /\  / /   ) |_) | |_) | ___   __ _ _ __ __| |
+   \ \/  \/ /   / /|  _ <|  _ < / _ \ / _` | '__/ _` |
+    \  /\  /   / /_| |_) | |_) | (_) | (_| | | | (_| |
+     \/  \/   |____|____/|____/ \___/ \__,_|_|  \__,_|
+EOF
+  echo -e "${NC}"
+  echo -e "  ${GREEN}Xray panel installer${NC}  ·  Ubuntu / Debian"
+  echo
+}
 
 need_root() {
   if [[ ${EUID} -ne 0 ]]; then
@@ -336,7 +352,14 @@ setup_domain_certificate() {
   systemctl stop "${APP_NAME}" >/dev/null 2>&1 || true
 
   local webPort="80"
-  prompt webPort "ACME HTTP-01 listen port (must be reachable as :80 from Internet)" "80"
+  while true; do
+    prompt webPort "ACME HTTP-01 listen port (usually 80, must be open from Internet)" "80"
+    if [[ "${webPort}" =~ ^[0-9]+$ ]] && (( webPort >= 1 && webPort <= 65535 )); then
+      break
+    fi
+    err "Port must be a number 1–65535 (got: ${webPort})"
+    [[ "${NONINTERACTIVE}" == "1" ]] && return 1
+  done
 
   "${HOME}/.acme.sh/acme.sh" --set-default-ca --server letsencrypt --force >/dev/null 2>&1 || true
   if ! "${HOME}/.acme.sh/acme.sh" --issue -d "${domain}" --standalone --httpport "${webPort}" --force; then
@@ -378,7 +401,14 @@ setup_ip_certificate() {
   systemctl stop "${APP_NAME}" >/dev/null 2>&1 || true
 
   local webPort="80"
-  prompt webPort "ACME HTTP-01 listen port" "80"
+  while true; do
+    prompt webPort "ACME HTTP-01 listen port" "80"
+    if [[ "${webPort}" =~ ^[0-9]+$ ]] && (( webPort >= 1 && webPort <= 65535 )); then
+      break
+    fi
+    err "Port must be a number 1–65535"
+    [[ "${NONINTERACTIVE}" == "1" ]] && return 1
+  done
   local domain_args=(-d "${ipv4}")
   if [[ -n "${ipv6}" ]]; then
     domain_args+=(-d "${ipv6}")
@@ -567,14 +597,20 @@ start_panel() {
 
 print_access() {
   echo
+  echo -e "${GREEN}┌──────────────────────────────────────────────────────────┐${NC}"
+  echo -e "${GREEN}│  Installation complete                                   │${NC}"
+  echo -e "${GREEN}└──────────────────────────────────────────────────────────┘${NC}"
+  echo
   log "Panel URL: ${SSL_SCHEME}://${SSL_HOST}:${PANEL_PORT}${PANEL_PATH}"
-  log "Login: credentials you set during install"
+  log "Login: see ${DATA_DIR}/install-result.env  (or the password you entered)"
   if [[ "${SSL_SCHEME}" == "https" ]]; then
     log "TLS: enabled (acme auto-renew restarts ${APP_NAME})"
+  else
+    warn "TLS: off — run: we1bboard ssl   when ready"
   fi
   echo
   echo -e "┌───────────────────────────────────────────────────────┐"
-  echo -e "│ ${BLUE}we1bboard${NC} control menu (like x-ui):                   │"
+  echo -e "│ ${BLUE}we1bboard${NC} control menu:                              │"
   echo -e "│                                                       │"
   echo -e "│ ${BLUE}we1bboard${NC}              - Admin management menu        │"
   echo -e "│ ${BLUE}we1bboard start${NC}        - Start                        │"
@@ -582,22 +618,87 @@ print_access() {
   echo -e "│ ${BLUE}we1bboard restart${NC}      - Restart                      │"
   echo -e "│ ${BLUE}we1bboard status${NC}       - Status                       │"
   echo -e "│ ${BLUE}we1bboard update${NC}       - Update to latest             │"
-  echo -e "│ ${BLUE}we1bboard legacy${NC}       - Install specific version     │"
-  echo -e "│ ${BLUE}we1bboard rollback${NC}     - Rollback previous binary     │"
   echo -e "│ ${BLUE}we1bboard ssl${NC}          - SSL certificate setup        │"
   echo -e "│ ${BLUE}we1bboard uninstall${NC}    - Uninstall                    │"
   echo -e "└───────────────────────────────────────────────────────┘"
 }
 
+setup_ufw() {
+  echo
+  echo -e "${YELLOW}Firewall (UFW):${NC}"
+  echo -e "${GREEN}1.${NC} Enable UFW and open panel / sub / 80 / 443 (recommended)"
+  echo -e "${GREEN}2.${NC} Skip (manage firewall yourself)"
+  local choice="1"
+  if [[ "${NONINTERACTIVE}" == "1" ]]; then
+    case "${WE1B_UFW:-1}" in
+      0|false|no|off) choice="2" ;;
+      *) choice="1" ;;
+    esac
+  else
+    read -r -p "Select [1]: " choice || true
+    choice="${choice:-1}"
+  fi
+  if [[ "${choice}" != "1" ]]; then
+    log "UFW skipped"
+    export WE1B_DATA_DIR="${DATA_DIR}"
+    # shellcheck disable=SC1090
+    [[ -f "${ENV_FILE}" ]] && set -a && source "${ENV_FILE}" && set +a
+    "${BIN_PATH}" setting set ufwEnable false 2>/dev/null || true
+    return 0
+  fi
+  if ! command -v ufw >/dev/null 2>&1; then
+    if command -v apt-get >/dev/null 2>&1; then
+      apt-get install -y ufw >/dev/null 2>&1 || true
+    fi
+  fi
+  if !command -v ufw >/dev/null 2>&1; then
+    warn "ufw not installed — skip"
+    return 0
+  fi
+  # Preserve SSH before enabling (avoid lockout)
+  local ssh_port="22"
+  if command -v ss >/dev/null 2>&1; then
+    local detected
+    detected="$(ss -lntp 2>/dev/null | awk '/sshd/ { for(i=1;i<=NF;i++) if($i ~ /:[0-9]+$/) { split($i,a,":"); print a[length(a)]; exit } }')"
+    if [[ "${detected}" =~ ^[0-9]+$ ]]; then
+      ssh_port="${detected}"
+    fi
+  fi
+  ufw allow "${ssh_port}/tcp" comment 'we1bboard-ssh' >/dev/null 2>&1 || true
+  ufw allow "${PANEL_PORT}/tcp" comment 'we1bboard-panel' >/dev/null 2>&1 || true
+  ufw allow 80/tcp comment 'we1bboard-http' >/dev/null 2>&1 || true
+  ufw allow 443/tcp comment 'we1bboard-https' >/dev/null 2>&1 || true
+  local subp
+  subp="$("${BIN_PATH}" setting get subPort 2>/dev/null || echo 2096)"
+  if [[ -n "${subp}" && "${subp}" != "${PANEL_PORT}" ]]; then
+    ufw allow "${subp}/tcp" comment 'we1bboard-sub' >/dev/null 2>&1 || true
+  fi
+  ufw --force enable >/dev/null 2>&1 || true
+  export WE1B_DATA_DIR="${DATA_DIR}"
+  # shellcheck disable=SC1090
+  [[ -f "${ENV_FILE}" ]] && set -a && source "${ENV_FILE}" && set +a
+  "${BIN_PATH}" setting set ufwEnable true 2>/dev/null || true
+  log "UFW enabled; opened SSH:${ssh_port}, panel:${PANEL_PORT}, 80, 443${subp:+, sub:${subp}}"
+}
+
 do_install() {
   need_root
-  log "Running We1BBoard installer..."
+  banner
+  log "Starting interactive install (like 3x-ui one-liner)"
+  step 1 "Install dependencies"
   install_deps
+  step 2 "Download We1BBoard binary"
   download_panel "$(detect_arch)"
+  step 3 "Choose database"
   choose_database
   write_service
+  step 4 "Panel access (port / path / admin)"
   configure_panel
+  step 5 "SSL certificate"
   prompt_and_setup_ssl
+  step 6 "Firewall (UFW)"
+  setup_ufw
+  step 7 "Start service"
   start_panel
   print_access
   log "Installation finished."

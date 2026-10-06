@@ -107,7 +107,7 @@ export function InboundsPage() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+      <div className="page-head">
         <div>
           <h1 className="page-title">{tr('inbounds')}</h1>
           <p className="page-sub">VLESS / VMess / Trojan / SS / WG / TUIC / Hy2 / MTProto / …</p>
@@ -136,7 +136,7 @@ export function InboundsPage() {
                 <td>{r.id}</td>
                 <td>{r.remark || r.tag}</td>
                 <td><span className="badge">{r.protocol}</span></td>
-                <td>{r.port}</td>
+                <td><code style={{ fontFamily: 'var(--mono)' }}>{r.port}</code></td>
                 <td><span className={`badge ${r.enable ? 'on' : 'off'}`}>{r.enable ? tr('enable') : tr('disable')}</span></td>
                 <td className="row-actions">
                   <button className="btn secondary" onClick={() => showLink(r.clients?.[0])}>{tr('link')}</button>

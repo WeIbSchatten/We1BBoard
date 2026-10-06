@@ -14,6 +14,7 @@ import (
 	"github.com/we1bboard/we1bboard/internal/database"
 	"github.com/we1bboard/we1bboard/internal/extra"
 	"github.com/we1bboard/we1bboard/internal/tgproxy"
+	"github.com/we1bboard/we1bboard/internal/ufw"
 	"github.com/we1bboard/we1bboard/internal/web"
 	"github.com/we1bboard/we1bboard/internal/web/job"
 	"github.com/we1bboard/we1bboard/internal/web/service"
@@ -75,6 +76,9 @@ func runServer() {
 
 	srv := web.NewServer(cfg, xrayMgr, extraMgr, tgMgr)
 	job.Start(srv.RT)
+	go func() {
+		ufw.SyncAllInbounds()
+	}()
 
 	go func() {
 		ch := make(chan os.Signal, 1)

@@ -722,6 +722,13 @@ func ValidateSettings(key, value string) error {
 		if p == "/" {
 			return fmt.Errorf("panelPath must not be root /")
 		}
+	case "ufwEnable":
+		v := strings.ToLower(strings.TrimSpace(value))
+		switch v {
+		case "true", "false", "1", "0", "yes", "no", "on", "off", "":
+		default:
+			return fmt.Errorf("invalid ufwEnable")
+		}
 	}
 	return nil
 }

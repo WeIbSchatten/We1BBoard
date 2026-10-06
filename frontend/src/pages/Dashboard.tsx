@@ -38,30 +38,41 @@ export function DashboardPage() {
 
   return (
     <div>
-      <h1 className="page-title">{tr('dashboard')}</h1>
-      <p className="page-sub">{tr('welcome')}</p>
-      <div className="grid2">
-        <div className="card">
-          <div className="label">{tr('status')} Xray</div>
-          <div style={{ fontSize: '1.4rem', fontWeight: 800 }}>
-            {st?.xrayRunning ? tr('running') : tr('stopped')}
-          </div>
-          <div style={{ color: 'var(--text-muted)', marginTop: 8 }}>v{st?.version || '—'}</div>
-          <button className="btn" style={{ marginTop: 12 }} onClick={restart}>
-            {tr('restart')}
-          </button>
-          {msg && <p className="page-sub">{msg}</p>}
+      <div className="page-head">
+        <div>
+          <h1 className="page-title">{tr('dashboard')}</h1>
+          <p className="page-sub">{tr('welcome')}</p>
         </div>
-        <div className="card">
-          <div className="label">CPU / RAM</div>
-          <div style={{ fontSize: '1.4rem', fontWeight: 800 }}>
-            {(st?.cpu ?? 0).toFixed(1)}% / {(st?.memory ?? 0).toFixed(1)}%
+        <button className="btn" onClick={restart}>{tr('restart')}</button>
+      </div>
+
+      <div className="stat-grid">
+        <div className="stat">
+          <div className="k">{tr('status')} Xray</div>
+          <div className="v">
+            <span className={`badge ${st?.xrayRunning ? 'on' : 'off'}`}>
+              {st?.xrayRunning ? tr('running') : tr('stopped')}
+            </span>
           </div>
-          <div style={{ marginTop: 12, color: 'var(--text-muted)' }}>
-            Extra processes: {st?.extra?.length ?? 0}
-          </div>
+          <div className="hint">panel v{st?.version || '—'}</div>
+        </div>
+        <div className="stat">
+          <div className="k">CPU</div>
+          <div className="v">{(st?.cpu ?? 0).toFixed(1)}%</div>
+          <div className="hint">live · 5s</div>
+        </div>
+        <div className="stat">
+          <div className="k">RAM</div>
+          <div className="v">{(st?.memory ?? 0).toFixed(1)}%</div>
+          <div className="hint">host memory</div>
+        </div>
+        <div className="stat">
+          <div className="k">Extra cores</div>
+          <div className="v">{st?.extra?.length ?? 0}</div>
+          <div className="hint">mtg / tuic / hy2 / tg</div>
         </div>
       </div>
+      {msg && <p className="page-sub" style={{ marginTop: 14 }}>{msg}</p>}
     </div>
   )
 }
