@@ -56,3 +56,24 @@ func TestMaskSecret(t *testing.T) {
 		t.Fatal(MaskSecret("short"))
 	}
 }
+
+func TestValidateDownloadRedirectURL(t *testing.T) {
+	for _, u := range []string{
+		"https://objects.githubusercontent.com/github-production-release-asset/1/x",
+		"https://release-assets.githubusercontent.com/github-production-release-asset/1/x",
+		"https://github.com/XTLS/Xray-core/releases/download/v1.8.24/Xray-linux-64.zip",
+	} {
+		if err := ValidateDownloadRedirectURL(u); err != nil {
+			t.Fatalf("expected allow %s: %v", u, err)
+		}
+	}
+	for _, u := range []string{
+		"https://evil.example.com/payload",
+		"file:///etc/passwd",
+		"http://127.0.0.1/x",
+	} {
+		if err := ValidateDownloadRedirectURL(u); err == nil {
+			t.Fatalf("expected reject %s", u)
+		}
+	}
+}

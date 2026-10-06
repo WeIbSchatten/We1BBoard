@@ -19,12 +19,38 @@ import {
   protocolNeedsStream,
   randomAwgObfuscation,
   randomSS2022Password,
+  suggestedFlow,
 } from '../lib/inboundForm'
-import { randomLowerAndNum, randomShortIds, randomSpiderX } from '../lib/random'
+import { randomInteger, randomLowerAndNum, randomShortIds, randomSpiderX } from '../lib/random'
 import { FormRow } from './FormRow'
 
 function ssPasswordForMethod(method: string): string {
   return method.startsWith('2022-') ? randomSS2022Password(method) : randomLowerAndNum(32)
+}
+
+/** Protocols with non-empty settings UI (not vless/vmess/trojan clients-only). */
+function protocolHasSettingsTab(protocol: string): boolean {
+  return [
+    'shadowsocks', 'wireguard', 'amneziawg', 'tuic', 'hysteria2',
+    'mtproto', 'http', 'socks',
+  ].includes(protocol)
+}
+
+function applyNetworkPathDefaults(next: InboundFormState, network: string): InboundFormState {
+  switch (network) {
+    case 'ws':
+      return { ...next, wsPath: '/', wsHost: '' }
+    case 'grpc':
+      return { ...next, grpcService: '' }
+    case 'httpupgrade':
+      return { ...next, httpupgradePath: '/' }
+    case 'xhttp':
+      return { ...next, xhttpPath: '/', xhttpMode: 'auto' }
+    case 'kcp':
+      return { ...next, kcpSeed: randomLowerAndNum(8) }
+    default:
+      return next
+  }
 }
 
 type Props = {
@@ -35,18 +61,18 @@ type Props = {
   onSaved: (created?: Inbound) => void
 }
 
-type Tab = 'general' | 'network' | 'security' | 'sniffing' | 'advanced'
+type Tab = 'basic' | 'protocol' | 'stream' | 'security' | 'sniffing' | 'advanced'
 
 export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Props) {
   const { tr } = useApp()
-  const [tab, setTab] = useState<Tab>('general')
+  const [tab, setTab] = useState<Tab>('basic')
   const [form, setForm] = useState<InboundFormState>(emptyInboundForm())
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     if (!open) return
-    setTab('general')
+    setTab('basic')
     setError('')
     if (mode === 'edit' && inbound) {
       setForm(parseInboundToForm(inbound))
@@ -54,6 +80,16 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
       setForm(emptyInboundForm())
     }
   }, [open, mode, inbound])
+
+  useEffect(() => {
+    if (!open) return
+    const needs = protocolNeedsStream(form.protocol)
+    const hasProto = protocolHasSettingsTab(form.protocol)
+    const showAdv = form.protocol === 'vless' || form.protocol === 'trojan' || needs
+    if (tab === 'protocol' && !hasProto) setTab('basic')
+    else if ((tab === 'stream' || tab === 'security' || tab === 'sniffing') && !needs) setTab('basic')
+    else if (tab === 'advanced' && !showAdv) setTab('basic')
+  }, [open, form.protocol, tab])
 
   function set<K extends keyof InboundFormState>(key: K, value: InboundFormState[K]) {
     setForm((prev) => {
@@ -67,6 +103,7 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
           next.network = 'tcp'
           next.security = 'none'
         }
+        // vless/vmess/trojan: keep security as-is (none stays none)
         if (value === 'amneziawg' || value === 'wireguard') {
           Object.assign(next, randomAwgObfuscation())
           next.wgAddress = '10.0.0.1/24'
@@ -85,6 +122,9 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
       }
       if (key === 'ssMethod') {
         next.ssPassword = ssPasswordForMethod(String(value))
+      }
+      if (key === 'network' && String(value) !== prev.network) {
+        next = applyNetworkPathDefaults(next, String(value))
       }
       if (key === 'security') {
         if (value === 'reality') {
@@ -126,7 +166,7 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
   }
 
   async function scanRealityTarget() {
-    const target = form.realityDest.trim() || 'www.cloudflare.com:443'
+    const target = form.realityDest.trim() || 'www.example.com:443'
     setError('')
     setBusy(true)
     try {
@@ -166,7 +206,7 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
         throw new Error('Generate REALITY keys first')
       }
       if (form.security === 'reality' && !form.realityDest) {
-        throw new Error('REALITY dest/target is required (e.g. www.cloudflare.com:443)')
+        throw new Error('REALITY dest/target is required (e.g. www.example.com:443)')
       }
       if (form.security === 'reality' && !form.realitySNI) {
         throw new Error('REALITY serverNames (SNI) is required')
@@ -174,8 +214,9 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
       if ((form.protocol === 'wireguard' || form.protocol === 'amneziawg') && !form.wgSecretKey.trim()) {
         throw new Error('Generate WireGuard secretKey first')
       }
+      const remark = form.remark.trim() || `${form.protocol}-${form.port}`
       const payload = {
-        remark: form.remark,
+        remark,
         port: form.port,
         listen: form.listen || '0.0.0.0',
         protocol: form.protocol,
@@ -202,21 +243,24 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
   if (!open) return null
 
   const needsStream = protocolNeedsStream(form.protocol)
+  const showProtocol = protocolHasSettingsTab(form.protocol)
   const showFallbacks = form.protocol === 'vless' || form.protocol === 'trojan'
   const showAdvanced = showFallbacks || needsStream
   const isWg = form.protocol === 'wireguard' || form.protocol === 'amneziawg'
+  const visionTip = suggestedFlow(form)
   const tabs: { id: Tab; label: string; show?: boolean }[] = [
-    { id: 'general', label: tr('tabGeneral') },
-    { id: 'network', label: tr('tabNetwork'), show: needsStream },
+    { id: 'basic', label: tr('tabGeneral') },
+    { id: 'protocol', label: tr('tabProtocol'), show: showProtocol },
+    { id: 'stream', label: tr('tabStream'), show: needsStream },
     { id: 'security', label: tr('tabSecurity'), show: needsStream },
     { id: 'sniffing', label: tr('tabSniffing'), show: needsStream },
-    { id: 'advanced', label: 'Advanced', show: showAdvanced },
+    { id: 'advanced', label: tr('tabAdvanced'), show: showAdvanced },
   ]
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <form className="modal modal--lg" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
-        <h3>{mode === 'edit' ? tr('edit') : tr('create')} inbound</h3>
+        <h3>{mode === 'edit' ? tr('editInbound') : tr('addInbound')}</h3>
 
         <div className="tabs">
           {tabs.filter((t) => t.show !== false).map((t) => (
@@ -227,29 +271,39 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
         </div>
 
         <div className="modal-body-scroll">
-          {tab === 'general' && (
+          {tab === 'basic' && (
             <div>
               <FormRow label={tr('remark')}>
-                <input className="input" value={form.remark} onChange={(e) => set('remark', e.target.value)} placeholder="My VLESS" />
+                <input className="input" value={form.remark} onChange={(e) => set('remark', e.target.value)} placeholder="" />
               </FormRow>
               <FormRow label={tr('port')}>
-                <input
-                  className="input input-number--compact"
-                  type="number"
-                  min={1}
-                  max={65535}
-                  value={form.port}
-                  onChange={(e) => set('port', Number(e.target.value))}
-                  required
-                />
+                <div className="input-compact">
+                  <input
+                    className="input input-number--compact"
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={form.port}
+                    onChange={(e) => set('port', Number(e.target.value))}
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="btn secondary btn-sm"
+                    title={tr('randomPort')}
+                    onClick={() => set('port', randomInteger(10000, 60000))}
+                  >
+                    ↻
+                  </button>
+                </div>
               </FormRow>
               <FormRow label={tr('protocol')}>
                 <select className="select" value={form.protocol} onChange={(e) => set('protocol', e.target.value)} disabled={mode === 'edit'}>
                   {PROTOCOLS.map((p) => <option key={p} value={p}>{p}</option>)}
                 </select>
               </FormRow>
-              <FormRow label="Listen" hint="Empty = 0.0.0.0">
-                <input className="input" value={form.listen} onChange={(e) => set('listen', e.target.value)} placeholder="0.0.0.0" />
+              <FormRow label={tr('listen')} hint={tr('listenHint')}>
+                <input className="input" value={form.listen} onChange={(e) => set('listen', e.target.value)} placeholder="" />
               </FormRow>
               <FormRow label={tr('enable')}>
                 <label className="form-switch">
@@ -257,7 +311,11 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
                   <span>{form.enable ? 'On' : 'Off'}</span>
                 </label>
               </FormRow>
+            </div>
+          )}
 
+          {tab === 'protocol' && showProtocol && (
+            <div>
               {form.protocol === 'shadowsocks' && (
                 <div className="form-section">
                   <div className="form-section__title">Shadowsocks</div>
@@ -398,12 +456,21 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
             </div>
           )}
 
-          {tab === 'network' && needsStream && (
+          {tab === 'stream' && needsStream && (
             <div>
               <FormRow label={tr('network')}>
-                <select className="select" value={form.network} onChange={(e) => set('network', e.target.value as InboundFormState['network'])}>
-                  {NETWORKS.map((n) => <option key={n} value={n}>{n === 'tcp' ? 'tcp (raw)' : n}</option>)}
-                </select>
+                <div className="seg seg--wrap">
+                  {NETWORKS.map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      className={form.network === n ? 'active' : ''}
+                      onClick={() => set('network', n)}
+                    >
+                      {n === 'tcp' ? 'tcp' : n}
+                    </button>
+                  ))}
+                </div>
               </FormRow>
 
               {form.network === 'ws' && (
@@ -474,6 +541,13 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
                   </div>
                 </div>
               )}
+
+              {form.network === 'tcp' && (
+                <div className="form-section">
+                  <div className="form-section__title">TCP</div>
+                  <div className="form-section__subtitle">No extra transport settings for raw TCP.</div>
+                </div>
+              )}
             </div>
           )}
 
@@ -529,37 +603,38 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
                 <div className="form-section">
                   <div className="form-section__title">REALITY</div>
                   <div className="form-section__body">
-                    <div className="row-actions" style={{ marginBottom: '0.85rem' }}>
-                      <button type="button" className="btn secondary btn-sm" onClick={() => refreshKeys()}>{tr('genKeys')}</button>
-                      <button type="button" className="btn secondary btn-sm" onClick={() => setForm((prev) => applyCloudflareRealityDefaults(prev))}>Cloudflare defaults</button>
-                      <button type="button" className="btn secondary btn-sm" onClick={() => set('realityShortIds', randomShortIds().join(','))}>ShortIds</button>
-                      <button type="button" className="btn secondary btn-sm" onClick={() => set('realitySpiderX', randomSpiderX())}>SpiderX</button>
-                    </div>
                     <FormRow label="Dest / target *">
                       <div className="input-compact">
-                        <input className="input" value={form.realityDest} onChange={(e) => set('realityDest', e.target.value)} placeholder="www.cloudflare.com:443" required={form.security === 'reality'} />
+                        <input
+                          className="input"
+                          value={form.realityDest}
+                          onChange={(e) => set('realityDest', e.target.value)}
+                          placeholder="www.example.com:443"
+                          required={form.security === 'reality'}
+                        />
                         <button type="button" className="btn secondary btn-sm" disabled={busy} onClick={() => { void scanRealityTarget() }}>{tr('scan')}</button>
                       </div>
                     </FormRow>
                     <FormRow label="ServerNames *">
-                      <input className="input" value={form.realitySNI} onChange={(e) => set('realitySNI', e.target.value)} placeholder="www.cloudflare.com" />
+                      <input className="input" value={form.realitySNI} onChange={(e) => set('realitySNI', e.target.value)} placeholder="www.example.com" />
                     </FormRow>
                     <FormRow label="Private key">
                       <div className="input-compact">
                         <input className="input" value={form.realityPrivateKey} onChange={(e) => set('realityPrivateKey', e.target.value)} />
-                        <button type="button" className="btn secondary btn-sm" onClick={() => { void refreshKeys() }}>↻</button>
+                        <button type="button" className="btn secondary btn-sm" title={tr('genKeys')} onClick={() => { void refreshKeys() }}>↻</button>
                       </div>
                     </FormRow>
                     <FormRow label="Public key">
-                      <input className="input" value={form.realityPublicKey} onChange={(e) => set('realityPublicKey', e.target.value)} readOnly />
+                      <div className="input-compact">
+                        <input className="input" value={form.realityPublicKey} onChange={(e) => set('realityPublicKey', e.target.value)} readOnly />
+                        <button type="button" className="btn secondary btn-sm" onClick={() => { void refreshKeys() }}>{tr('genKeys')}</button>
+                      </div>
                     </FormRow>
                     <FormRow label="Short IDs" hint="Comma-separated">
-                      <input className="input" value={form.realityShortIds} onChange={(e) => set('realityShortIds', e.target.value)} />
-                    </FormRow>
-                    <FormRow label="Fingerprint">
-                      <select className="select" value={form.realityFingerprint} onChange={(e) => set('realityFingerprint', e.target.value)}>
-                        {FINGERPRINTS.map((fp) => <option key={fp} value={fp}>{fp}</option>)}
-                      </select>
+                      <div className="input-compact">
+                        <input className="input" value={form.realityShortIds} onChange={(e) => set('realityShortIds', e.target.value)} />
+                        <button type="button" className="btn secondary btn-sm" onClick={() => set('realityShortIds', randomShortIds().join(','))}>↻</button>
+                      </div>
                     </FormRow>
                     <FormRow label="SpiderX">
                       <div className="input-compact">
@@ -567,6 +642,27 @@ export function InboundFormModal({ open, mode, inbound, onClose, onSaved }: Prop
                         <button type="button" className="btn secondary btn-sm" onClick={() => set('realitySpiderX', randomSpiderX())}>↻</button>
                       </div>
                     </FormRow>
+                    <FormRow label="Fingerprint">
+                      <select className="select" value={form.realityFingerprint} onChange={(e) => set('realityFingerprint', e.target.value)}>
+                        {FINGERPRINTS.map((fp) => <option key={fp} value={fp}>{fp}</option>)}
+                      </select>
+                    </FormRow>
+
+                    {visionTip && (
+                      <div className="alert info">
+                        {tr('realityVisionTip')} <code>{visionTip}</code>
+                      </div>
+                    )}
+
+                    <div className="row-actions" style={{ marginTop: '0.85rem' }}>
+                      <button
+                        type="button"
+                        className="btn secondary btn-sm"
+                        onClick={() => setForm((prev) => applyCloudflareRealityDefaults(prev))}
+                      >
+                        {tr('cloudflareDefaults')}
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}

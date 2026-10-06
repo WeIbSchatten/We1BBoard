@@ -119,7 +119,18 @@ func ValidateNodeURL(raw string) error {
 }
 
 // SafeHTTPClient dials only after re-checking resolved IPs (mitigates DNS rebinding).
+// Redirects are NOT followed (caller gets 3xx). Use SafeDownloadClient for GitHub assets.
 func SafeHTTPClient(insecureTLS bool, timeout time.Duration) *http.Client {
+	return newSafeHTTPClient(insecureTLS, timeout, false)
+}
+
+// SafeDownloadClient is like SafeHTTPClient but follows redirects only to
+// allow-listed public CDN hosts (GitHub release assets return 302 → objects.githubusercontent.com).
+func SafeDownloadClient(insecureTLS bool, timeout time.Duration) *http.Client {
+	return newSafeHTTPClient(insecureTLS, timeout, true)
+}
+
+func newSafeHTTPClient(insecureTLS bool, timeout time.Duration, followRedirects bool) *http.Client {
 	base := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
 	tr := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
@@ -165,13 +176,61 @@ func SafeHTTPClient(insecureTLS bool, timeout time.Duration) *http.Client {
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 	}
-	return &http.Client{
-		Timeout:   timeout,
-		Transport: tr,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+	c := &http.Client{Timeout: timeout, Transport: tr}
+	if followRedirects {
+		c.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 8 {
+				return fmt.Errorf("too many redirects")
+			}
+			if err := ValidateDownloadRedirectURL(req.URL.String()); err != nil {
+				return err
+			}
+			return nil
+		}
+	} else {
+		c.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
-		},
+		}
 	}
+	return c
+}
+
+// ValidateDownloadRedirectURL allows only known public release CDN hosts.
+func ValidateDownloadRedirectURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return fmt.Errorf("invalid redirect url")
+	}
+	if u.Scheme != "https" && u.Scheme != "http" {
+		return fmt.Errorf("redirect scheme not allowed")
+	}
+	host := strings.ToLower(u.Hostname())
+	allowed := []string{
+		"github.com",
+		"api.github.com",
+		"objects.githubusercontent.com",
+		"release-assets.githubusercontent.com",
+		"github-releases.githubusercontent.com",
+		"codeload.github.com",
+	}
+	ok := false
+	for _, a := range allowed {
+		if host == a || strings.HasSuffix(host, "."+a) {
+			ok = true
+			break
+		}
+	}
+	// also allow *.githubusercontent.com
+	if strings.HasSuffix(host, ".githubusercontent.com") || host == "githubusercontent.com" {
+		ok = true
+	}
+	if !ok {
+		return fmt.Errorf("redirect host not allowed: %s", host)
+	}
+	if err := ValidateDialHost(host); err != nil {
+		return err
+	}
+	return nil
 }
 
 // MaskSecret truncates a secret for API responses.

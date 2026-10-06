@@ -92,7 +92,7 @@ func (a *API) UpdateGeodata(c *gin.Context) {
 		fail(c, 500, err)
 		return
 	}
-	client := security.SafeHTTPClient(false, 120*time.Second)
+	client := security.SafeDownloadClient(false, 120*time.Second)
 	gsPath := filepath.Join(dir, "geosite.dat")
 	giPath := filepath.Join(dir, "geoip.dat")
 	gsBytes, err := downloadToFile(client, geositeURL, gsPath)

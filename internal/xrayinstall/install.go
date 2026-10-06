@@ -42,7 +42,7 @@ func InstallLatest(binDir, destBin, version string) (*Result, error) {
 	}
 
 	version = strings.TrimSpace(strings.TrimPrefix(version, "v"))
-	client := security.SafeHTTPClient(false, 120*time.Second)
+	client := security.SafeDownloadClient(false, 120*time.Second)
 	if version == "" {
 		latest, err := fetchLatestTag(client)
 		if err != nil {

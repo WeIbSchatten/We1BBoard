@@ -581,11 +581,21 @@ button, input, select, textarea { font: inherit; }
   border-radius: 10px;
   overflow: hidden;
 }
+.seg.seg--wrap {
+  display: flex;
+  flex-wrap: wrap;
+  width: 100%;
+  overflow: visible;
+}
 .seg button {
   border: 0; background: transparent; color: var(--text-muted);
   padding: 0.45rem 0.85rem; cursor: pointer; font-weight: 600; font-size: 0.85rem;
 }
 .seg button.active { background: var(--accent-soft); color: var(--accent); }
+.alert.info {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
 .modal.modal--lg { width: min(780px, 100%); }
 .modal.modal--md { width: min(720px, 100%); }
 .modal-body-scroll { flex: 1; min-height: 0; max-height: calc(100vh - 160px); overflow: auto; padding-right: 2px; }

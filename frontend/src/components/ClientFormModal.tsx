@@ -18,6 +18,8 @@ type Props = {
 
 type Tab = 'basic' | 'config' | 'links'
 
+const EXPIRY_PRESETS = [0, 1, 7, 30, 90, 180, 365] as const
+
 function freshEmail(): string {
   return `${randomLowerAndNum(8)}@we1b`
 }
@@ -30,6 +32,10 @@ function parseSelectedIds(client: Client | null, fallback: number): number[] {
   if (client?.inboundId) return [client.inboundId]
   if (fallback) return [fallback]
   return []
+}
+
+function showUuid(protocol: string): boolean {
+  return protocol === 'vless' || protocol === 'vmess' || !protocol
 }
 
 export function ClientFormModal({ open, mode, inbound, inbounds, client, groupNames, onClose, onSaved }: Props) {
@@ -59,9 +65,12 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, groupNa
     [inbounds],
   )
 
+  const inboundLocked = mode === 'add' && !!inbound
   const primaryId = inbound?.id || selectedInboundIds[0] || 0
   const selectedInbound = inbound || eligibleInbounds.find((i) => i.id === primaryId) || null
   const protocol = selectedInbound?.protocol || ''
+  const inboundForm = selectedInbound ? parseInboundToForm(selectedInbound) : null
+  const visionTip = inboundForm ? suggestedFlow(inboundForm) : ''
 
   useEffect(() => {
     if (!open) return
@@ -115,8 +124,7 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, groupNa
   function toggleInbound(id: number) {
     setSelectedInboundIds((prev) => {
       if (prev.includes(id)) {
-        const next = prev.filter((x) => x !== id)
-        return next
+        return prev.filter((x) => x !== id)
       }
       const next = [...prev, id]
       const ib = eligibleInbounds.find((i) => i.id === id)
@@ -128,7 +136,7 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, groupNa
   async function submit(e: FormEvent) {
     e.preventDefault()
     setError('')
-    const ids = mode === 'add' && inbound ? [inbound.id] : selectedInboundIds
+    const ids = inboundLocked && inbound ? [inbound.id] : selectedInboundIds
     if (!ids.length) {
       setError('Select at least one inbound')
       return
@@ -177,20 +185,20 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, groupNa
   return (
     <div className="modal-backdrop modal-backdrop--top" onClick={onClose}>
       <form className="modal modal--md" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
-        <h3>{mode === 'edit' ? tr('edit') : tr('create')} {tr('clients')}</h3>
+        <h3>{mode === 'edit' ? tr('editClient') : tr('addClient')}</h3>
         <div className="tabs">
           <button type="button" className={`tab ${tab === 'basic' ? 'active' : ''}`} onClick={() => setTab('basic')}>{tr('tabGeneral')}</button>
           <button type="button" className={`tab ${tab === 'config' ? 'active' : ''}`} onClick={() => setTab('config')}>{tr('tabConfig')}</button>
-          <button type="button" className={`tab ${tab === 'links' ? 'active' : ''}`} onClick={() => setTab('links')}>Links</button>
+          <button type="button" className={`tab ${tab === 'links' ? 'active' : ''}`} onClick={() => setTab('links')}>{tr('tabLinks')}</button>
         </div>
 
         <div className="modal-body-scroll">
           {tab === 'basic' && (
             <div>
-              {!(mode === 'add' && inbound) && (
-                <FormRow stack label="Inbounds (multi)">
+              {!inboundLocked && (
+                <FormRow stack label={tr('inboundsMulti')}>
                   <div className="check-list">
-                    {eligibleInbounds.length === 0 && <span className="page-sub">No eligible inbounds</span>}
+                    {eligibleInbounds.length === 0 && <span className="page-sub">{tr('noEligibleInbounds')}</span>}
                     {eligibleInbounds.map((i) => (
                       <label key={i.id} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                         <input
@@ -204,103 +212,126 @@ export function ClientFormModal({ open, mode, inbound, inbounds, client, groupNa
                   </div>
                 </FormRow>
               )}
-              {mode === 'add' && inbound && (
-                <FormRow stack label="Inbound">
+              {inboundLocked && inbound && (
+                <FormRow label={tr('inbound')}>
                   <input className="input" readOnly value={`#${inbound.id} ${inbound.remark || inbound.tag} (${inbound.protocol}:${inbound.port})`} />
                 </FormRow>
               )}
 
-              <div className="form-grid">
-                <FormRow stack label="Email">
-                  <div className="input-compact">
-                    <input className="input" value={email} onChange={(e) => setEmail(e.target.value)} required />
-                    <button type="button" className="btn secondary btn-sm" onClick={() => setEmail(freshEmail())}>↻</button>
-                  </div>
-                </FormRow>
-                <FormRow stack label="Total GB" hint="0 = unlimited">
-                  <input className="input" type="number" min={0} value={totalGB} onChange={(e) => setTotalGB(Number(e.target.value))} />
-                </FormRow>
-                <FormRow stack label="Limit IP" hint="0 = unlimited">
-                  <input className="input" type="number" min={0} value={limitIp} onChange={(e) => setLimitIp(Number(e.target.value))} />
-                </FormRow>
-                <FormRow stack label="Limit HWID" hint="0 = unlimited">
-                  <input className="input" type="number" min={0} value={limitHwid} onChange={(e) => setLimitHwid(Number(e.target.value))} />
-                </FormRow>
-                <FormRow stack label="Expiry days" hint="0 = never">
-                  <input className="input" type="number" min={0} value={expiryDays} onChange={(e) => setExpiryDays(Number(e.target.value))} />
-                </FormRow>
-                <FormRow stack label="Traffic reset">
-                  <select className="select" value={trafficReset} onChange={(e) => setTrafficReset(e.target.value)}>
-                    <option value="never">never</option>
-                    <option value="daily">daily</option>
-                    <option value="weekly">weekly</option>
-                    <option value="monthly">monthly</option>
-                  </select>
-                </FormRow>
-                <FormRow stack label="Telegram ID">
-                  <input className="input" type="number" value={tgId} onChange={(e) => setTgId(Number(e.target.value))} />
-                </FormRow>
-                <FormRow stack label="Comment">
-                  <input className="input" value={comment} onChange={(e) => setComment(e.target.value)} />
-                </FormRow>
-                <FormRow stack label={tr('group')}>
+              <FormRow label="Email">
+                <div className="input-compact">
+                  <input className="input" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                  <button type="button" className="btn secondary btn-sm" onClick={() => setEmail(freshEmail())}>↻</button>
+                </div>
+              </FormRow>
+              <FormRow label="Total GB" hint={tr('unlimitedHint')}>
+                <input className="input" type="number" min={0} value={totalGB} onChange={(e) => setTotalGB(Number(e.target.value))} />
+              </FormRow>
+              <FormRow label="Limit IP" hint={tr('unlimitedHint')}>
+                <input className="input" type="number" min={0} value={limitIp} onChange={(e) => setLimitIp(Number(e.target.value))} />
+              </FormRow>
+              <FormRow label="Limit HWID" hint={tr('unlimitedHint')}>
+                <input className="input" type="number" min={0} value={limitHwid} onChange={(e) => setLimitHwid(Number(e.target.value))} />
+              </FormRow>
+              <FormRow label={tr('expiryDays')} hint={tr('expiryNeverHint')}>
+                <div>
                   <input
                     className="input"
-                    list="client-group-names"
-                    value={group}
-                    onChange={(e) => setGroup(e.target.value)}
-                    placeholder={tr('groupName')}
+                    type="number"
+                    min={0}
+                    value={expiryDays}
+                    onChange={(e) => setExpiryDays(Number(e.target.value))}
                   />
-                  <datalist id="client-group-names">
-                    {(groupNames || []).map((g) => (
-                      <option key={g} value={g} />
+                  <div className="seg seg--wrap" style={{ marginTop: 8 }}>
+                    {EXPIRY_PRESETS.map((d) => (
+                      <button
+                        key={d}
+                        type="button"
+                        className={expiryDays === d ? 'active' : ''}
+                        onClick={() => setExpiryDays(d)}
+                      >
+                        {d === 0 ? '∞' : `${d}d`}
+                      </button>
                     ))}
-                  </datalist>
-                </FormRow>
-                <FormRow stack label={tr('enable')}>
-                  <label className="form-switch">
-                    <input type="checkbox" checked={enable} onChange={(e) => setEnable(e.target.checked)} />
-                    <span>{enable ? 'Enabled' : 'Disabled'}</span>
-                  </label>
-                </FormRow>
-              </div>
+                  </div>
+                </div>
+              </FormRow>
+              <FormRow label={tr('trafficReset')}>
+                <select className="select" value={trafficReset} onChange={(e) => setTrafficReset(e.target.value)}>
+                  <option value="never">never</option>
+                  <option value="daily">daily</option>
+                  <option value="weekly">weekly</option>
+                  <option value="monthly">monthly</option>
+                </select>
+              </FormRow>
+              <FormRow label={tr('telegramId')}>
+                <input className="input" type="number" value={tgId} onChange={(e) => setTgId(Number(e.target.value))} />
+              </FormRow>
+              <FormRow label={tr('comment')}>
+                <input className="input" value={comment} onChange={(e) => setComment(e.target.value)} />
+              </FormRow>
+              <FormRow label={tr('group')}>
+                <input
+                  className="input"
+                  list="client-group-names"
+                  value={group}
+                  onChange={(e) => setGroup(e.target.value)}
+                  placeholder={tr('groupName')}
+                />
+                <datalist id="client-group-names">
+                  {(groupNames || []).map((g) => (
+                    <option key={g} value={g} />
+                  ))}
+                </datalist>
+              </FormRow>
+              <FormRow label={tr('enable')}>
+                <label className="form-switch">
+                  <input type="checkbox" checked={enable} onChange={(e) => setEnable(e.target.checked)} />
+                  <span>{enable ? tr('filterEnabled') : tr('filterDisabled')}</span>
+                </label>
+              </FormRow>
             </div>
           )}
 
           {tab === 'config' && (
-            <div>
-              <FormRow stack label="UUID">
-                <div className="input-compact">
-                  <input className="input" value={uuid} onChange={(e) => setUuid(e.target.value)} />
-                  <button type="button" className="btn secondary btn-sm" onClick={() => setUuid(randomUUID())}>↻</button>
-                </div>
-              </FormRow>
-              <FormRow stack label="Sub ID" hint="At least 16 characters">
-                <div className="input-compact">
-                  <input className="input" value={subId} onChange={(e) => setSubId(e.target.value)} />
-                  <button type="button" className="btn secondary btn-sm" onClick={() => setSubId(randomLowerAndNum(16))}>↻</button>
-                </div>
-              </FormRow>
-              <FormRow stack label={tr('password')}>
-                <div className="input-compact">
-                  <input className="input" value={password} onChange={(e) => setPassword(e.target.value)} />
-                  <button type="button" className="btn secondary btn-sm" onClick={() => setPassword(randomLowerAndNum(16))}>↻</button>
-                </div>
-              </FormRow>
-              {(protocol === 'vless' || !protocol) && (
-                <FormRow stack label="Flow">
-                  <select className="select" value={flow} onChange={(e) => setFlow(e.target.value)}>
-                    <option value="">(none)</option>
-                    <option value="xtls-rprx-vision">xtls-rprx-vision</option>
-                    <option value="xtls-rprx-vision-udp443">xtls-rprx-vision-udp443</option>
-                  </select>
+            <div className="form-section">
+              <div className="form-section__title">{tr('tabConfig')}</div>
+              <div className="form-section__body">
+                {showUuid(protocol) && (
+                  <FormRow label="UUID">
+                    <div className="input-compact">
+                      <input className="input" value={uuid} onChange={(e) => setUuid(e.target.value)} />
+                      <button type="button" className="btn secondary btn-sm" onClick={() => setUuid(randomUUID())}>↻</button>
+                    </div>
+                  </FormRow>
+                )}
+                <FormRow label={tr('password')}>
+                  <div className="input-compact">
+                    <input className="input" value={password} onChange={(e) => setPassword(e.target.value)} />
+                    <button type="button" className="btn secondary btn-sm" onClick={() => setPassword(randomLowerAndNum(16))}>↻</button>
+                  </div>
                 </FormRow>
-              )}
+                <FormRow label="Sub ID" hint={tr('subIdHint')}>
+                  <div className="input-compact">
+                    <input className="input" value={subId} onChange={(e) => setSubId(e.target.value)} />
+                    <button type="button" className="btn secondary btn-sm" onClick={() => setSubId(randomLowerAndNum(16))}>↻</button>
+                  </div>
+                </FormRow>
+                {(protocol === 'vless' || !protocol) && (
+                  <FormRow label="Flow" hint={visionTip ? `${tr('realityVisionTip')} ${visionTip}` : undefined}>
+                    <select className="select" value={flow} onChange={(e) => setFlow(e.target.value)}>
+                      <option value="">(none)</option>
+                      <option value="xtls-rprx-vision">xtls-rprx-vision</option>
+                      <option value="xtls-rprx-vision-udp443">xtls-rprx-vision-udp443</option>
+                    </select>
+                  </FormRow>
+                )}
+              </div>
             </div>
           )}
 
           {tab === 'links' && (
-            <FormRow stack label="Extra share links" hint="One per line — appended to subscription">
+            <FormRow stack label={tr('extraShareLinks')} hint={tr('extraShareLinksHint')}>
               <textarea
                 className="textarea"
                 rows={8}
