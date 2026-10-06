@@ -15,6 +15,7 @@
 
 .DS_Store
 *.tar.gz
-we1bboard
+/we1bboard
+/we1bboard.exe
 /tmp/
 *.tsbuildinfo
